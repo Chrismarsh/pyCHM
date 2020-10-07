@@ -1,5 +1,1 @@
-vtk
-numpy
-xarray
-netCDF4
-pandas
+.
