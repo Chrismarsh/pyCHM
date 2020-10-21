@@ -32,10 +32,18 @@ def _regrid_mesh_to_grid(mesh, grid, fname, var):
     srcfield = ESMF.Field(mesh, name=var, meshloc=ESMF.MeshLoc.ELEMENT)
     srcfield.data[:] = vtu[var]
     dstfield = ESMF.Field(grid, var)
-    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=ESMF.RegridMethod.CONSERVE_2ND, unmapped_action=ESMF.UnmappedAction.IGNORE)
+
+    # Do not use the 2nd order Conserve!
+    # Another difference is that the second-order method does not guarantee that after regridding the range of values
+    # in the destination field is within the range of values in the source field. For example, if the mininum value
+    # in the source field is 0.0, then it's possible that after regridding with the second-order method, the
+    # destination field will contain values less than 0.0.
+    # https://esmf-org.github.io/dev_docs/ESMF_refdoc/node3.html#SECTION03023000000000000000
+    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=ESMF.RegridMethod.CONSERVE, unmapped_action=ESMF.UnmappedAction.IGNORE)
     out = regrid(srcfield, dstfield)
 
     df = da.from_array(out.data)
+
     return df
 
 @dask.delayed
