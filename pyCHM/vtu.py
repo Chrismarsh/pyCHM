@@ -25,9 +25,17 @@ def _get_shape(mesh, dxdy):
 
 
 @dask.delayed
-def _regrid_mesh_to_grid(mesh, grid, fname, var):
+def _load_vtu(fname):
+    print('actually loading vtu ' + fname[0])
     vtu = pv.MultiBlock([pv.read(f) for f in fname])
     vtu = vtu.combine()
+    return vtu
+
+
+@dask.delayed
+def _regrid_mesh_to_grid(vtu, dxdy, var):
+
+    mesh, grid = _build_regridding_ds(vtu, dxdy)
 
     srcfield = ESMF.Field(mesh, name=var, meshloc=ESMF.MeshLoc.ELEMENT)
     srcfield.data[:] = vtu[var]
@@ -46,11 +54,11 @@ def _regrid_mesh_to_grid(mesh, grid, fname, var):
 
     return df
 
-@dask.delayed
-def _build_regridding_ds(fname, dxdy):
+# @dask.delayed
+def _build_regridding_ds(mesh, dxdy):
 
-    mesh = pv.MultiBlock([pv.read(f) for f in fname])
-    mesh = mesh.combine()
+    # mesh = pv.MultiBlock([pv.read(f) for f in fname])
+    # mesh = mesh.combine()
 
     nodes, elements = (0, 1)
     u, v = (0, 1)
@@ -199,6 +207,8 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
     shape = _get_shape(blocks, dxdy)
 
+    proj4 = blocks[0]["proj4"][0]
+    print(f'proj4 = {proj4}')
     if variables is not None:
         # ensure we are not asking for an output that is a vector
         for v in variables:
@@ -223,21 +233,29 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
     y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
                            stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
 
-    res = _build_regridding_ds(vtu_paths[0], dxdy)
-    esmf_mesh, esmf_grid = res[0],res[1]
+    # res = _build_regridding_ds(vtu_paths[0], dxdy)
+    # esmf_mesh, esmf_grid = res[0],res[1]
     # flush
     blocks = None
     for v in vtu_paths:
-        for var in variables:
-            df = _regrid_mesh_to_grid(esmf_mesh, esmf_grid, v, var)
 
+        vtu = _load_vtu(v)
+
+        for var in variables:
+            # df = _regrid_mesh_to_grid(esmf_mesh, esmf_grid, v, var)
+            df = _regrid_mesh_to_grid(vtu, dxdy, var)
             d = da.from_delayed(df,
                                 shape=shape,
                                 dtype=np.dtype('float64'))
 
-            tmp = xr.DataArray(d, name=var, dims=['y','x'], coords=[('x', x_center), ('y', y_center)])
+            tmp = xr.DataArray(d.T, name=var,
+                               coords={'y': y_center,
+                                       'x': x_center},
+                               dims=['y', 'x'])
 
-            delayed_vtu[var].append(tmp.T)
+
+
+            delayed_vtu[var].append(tmp)
 
     end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
 
@@ -249,7 +267,9 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
         delayed_vtu[key] = xr.concat(vtus, dim=times)
         delayed_vtu[key].chunk({'time':1})
 
-    return xr.Dataset(data_vars=delayed_vtu)
+    ds = xr.Dataset(data_vars=delayed_vtu)
+    ds = ds.rio.write_crs(proj4)
+    return ds
 
 
 
