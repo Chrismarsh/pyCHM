@@ -1,5 +1,6 @@
 from setuptools import setup
 import subprocess
+from setuptools import find_packages
 
 def get_installed_gdal_version():
     try:
@@ -19,9 +20,11 @@ setup(
     version='0.0.1',
     description='python tools for CHM',
     license='MIT',
-    packages=['pyCHM'],
+    packages=find_packages(),
     author='Chris Marsh',
     author_email='chris.marsh@usask.ca',
-    install_requires=['vtk','numpy','xarray','netCDF4','pandas', 'pygdal'+get_installed_gdal_version()],
+    install_requires=['vtk','numpy','xarray','netCDF4','pandas',
+                      'pygdal'+get_installed_gdal_version(), 'dask[complete]',
+                      'pyvista', 'pyESMF==8.1.0.2b36','rioxarray','pandas','rasterio'],
     scripts=["scripts/vtu2geo.py","scripts/windmapper2mesher.py"],
 )

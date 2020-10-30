@@ -6,12 +6,11 @@ import numpy as np
 import pandas as pd
 import dask
 import dask.array as da
-import time
 import re
 import ESMF
 import pathlib
-
-esmf_mesh_geom = None
+from rasterio.warp import transform
+import rioxarray # for xarray.rio
 
 def _get_shape(mesh, dxdy):
     # number of cells @ this dxdy
@@ -26,7 +25,7 @@ def _get_shape(mesh, dxdy):
 
 @dask.delayed
 def _load_vtu(fname):
-    print('actually loading vtu ' + fname[0])
+    # print('actually loading vtu ' + fname[0])
     vtu = pv.MultiBlock([pv.read(f) for f in fname])
     vtu = vtu.combine()
     return vtu
@@ -35,12 +34,13 @@ def _load_vtu(fname):
 @dask.delayed
 def _regrid_mesh_to_grid(vtu, dxdy, var):
 
+    # print('regrid triggered')
     mesh, grid = _build_regridding_ds(vtu, dxdy)
 
     srcfield = ESMF.Field(mesh, name=var, meshloc=ESMF.MeshLoc.ELEMENT)
     srcfield.data[:] = vtu[var]
     dstfield = ESMF.Field(grid, var)
-
+    dstfield.data[...] = np.nan
     # Do not use the 2nd order Conserve!
     # Another difference is that the second-order method does not guarantee that after regridding the range of values
     # in the destination field is within the range of values in the source field. For example, if the mininum value
@@ -48,7 +48,7 @@ def _regrid_mesh_to_grid(vtu, dxdy, var):
     # destination field will contain values less than 0.0.
     # https://esmf-org.github.io/dev_docs/ESMF_refdoc/node3.html#SECTION03023000000000000000
     regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=ESMF.RegridMethod.CONSERVE, unmapped_action=ESMF.UnmappedAction.IGNORE)
-    out = regrid(srcfield, dstfield)
+    out = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
 
     df = da.from_array(out.data)
 
@@ -216,7 +216,7 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
                 raise Exception('Cannot specify a variable that is a vector output shape = (n,3) ')
     else:
         variables = []
-        blacklist = ['proj4']
+        blacklist = ['proj4', 'global_id']
         for v in blocks[0].array_names:
             if len(blocks[0][v].shape) == 1 and v not in blacklist: # don't add the vectors
                 a = v.replace('[param] ','_param_').replace('/','') # sanitize the name, this should be fixed in CHM though
@@ -233,16 +233,14 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
     y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
                            stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
 
-    # res = _build_regridding_ds(vtu_paths[0], dxdy)
-    # esmf_mesh, esmf_grid = res[0],res[1]
-    # flush
+
     blocks = None
     for v in vtu_paths:
 
+        # print(v)
         vtu = _load_vtu(v)
 
         for var in variables:
-            # df = _regrid_mesh_to_grid(esmf_mesh, esmf_grid, v, var)
             df = _regrid_mesh_to_grid(vtu, dxdy, var)
             d = da.from_delayed(df,
                                 shape=shape,
@@ -253,8 +251,6 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
                                        'x': x_center},
                                dims=['y', 'x'])
 
-
-
             delayed_vtu[var].append(tmp)
 
     end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
@@ -263,12 +259,23 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
     times = pd.date_range(start = epoch, end = end_time, freq= f'{_dt} s' , name="time")
 
-    for key, vtus in delayed_vtu.items():
-        delayed_vtu[key] = xr.concat(vtus, dim=times)
-        delayed_vtu[key].chunk({'time':1})
+    for var, arrays in delayed_vtu.items():
+        delayed_vtu[var] = xr.concat(arrays, dim=times)
+        delayed_vtu[var].chunk({'time':1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
-    ds = ds.rio.write_crs(proj4)
+    ds = ds.rio.set_crs(proj4)
+
+    # Compute the lon/lat coordinates with rasterio.warp.transform
+    ny, nx = len(ds['y']), len(ds['x'])
+    x, y = np.meshgrid(ds['x'], ds['y'])
+    # Rasterio works with 1D arrays
+    lon, lat = transform(ds.rio.crs, {'init': 'EPSG:4326'}, x.flatten(), y.flatten())
+    lon = np.asarray(lon).reshape((ny, nx))
+    lat = np.asarray(lat).reshape((ny, nx))
+    ds.coords['lon'] = (('y', 'x'), lon)
+    ds.coords['lat'] = (('y', 'x'), lat)
+
     return ds
 
 

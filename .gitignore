@@ -2,3 +2,4 @@
 /docs/_build/*
 /docs/doxygen/*
 /docs/_ext/__pycache__
+/.ipynb_checkpoints

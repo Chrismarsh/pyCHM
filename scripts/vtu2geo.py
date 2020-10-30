@@ -1,5 +1,7 @@
+#!/usr/bin/env python
+
 import vtk
-from osgeo import gdal,ogr,osr
+from osgeo import gdal, ogr, osr
 from osgeo.gdalconst import GA_ReadOnly
 import math
 import imp
@@ -8,10 +10,10 @@ import xml.etree.ElementTree as ET
 import subprocess
 import numpy as np
 import os
+import re
 
 import resource
 
-from rasterio.warp import transform
 import xarray as xr
 
 gdal.UseExceptions()  # Enable errors
@@ -263,21 +265,49 @@ def main():
     if is_pvd and timesteps is not None:
         epoch = np.datetime64(int(timesteps[0].get('timestep')),'s')
 
-    dt=1 # model timestep, in seconds
+    dt = 1 # model timestep, in seconds
+
+    # before we can come up with a possible dt, we need to see if we have the MPI outputs which will have 1 file
+    # per MPI rank with a [basename]<timestamp>_<MPIRANK>.vut format
+
+    is_mpi_output = False
+    ranks = []
+    nranks = 0
+    m = re.findall('.+_([0-9]+).vtu', pvd[0])
+    if len(m) > 0 :
+        is_mpi_output = True
+        # loop through to detect how many mpi ranks were used
+
+        for f in pvd:
+            m = re.findall('.+_([0-9]+).vtu', f)
+            m = int(m[0])
+            if m not in ranks:
+                ranks.append(m[0])
+            else:
+                break
+
+        print(f'MPI ranks = {len(ranks)} detected in vtu')
+        nranks = len(ranks) - 1 # 0-index!!
+
+    # reorganize the flat structure to handle MPI
+    for file, ts in zip(pvd, timesteps):
 
     if timesteps is not None and len(timesteps) > 1:
-        dt = int(timesteps[1].get('timestep')) - int(timesteps[0].get('timestep'))
-
+        if not is_mpi_output:
+            dt = int(timesteps[1].get('timestep')) - int(timesteps[0].get('timestep'))
+        else:
+            if len(timesteps) > len(ranks):
+                dt = int(timesteps[nranks + 1].get('timestep')) - int(timesteps[0].get('timestep'))
 
     print(('Start epoch: %s, model dt = %i (s)' %(epoch,dt)))
 
-    #because of how the netcdf is built we hold a file of file handles before converting. ensure we can do so
+    # because of how the netcdf is built we hold a file of file handles before converting. ensure we can do so
     if nc_archive:
         soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
         total_output_files = len(pvd) * (len(variables)+len(parameters))
         if soft < total_output_files or hard < total_output_files:
           
-            print('The users soft or hard file limit is less than the total number of tmp files to be created.')
+            print('The system soft or hard file limit is less than the total number of tmp files to be created.')
             print('The system ulimit will be raised to at least ' + str(total_output_files))
 
             try:
@@ -287,11 +317,15 @@ def main():
                 raise e
 
 
+    # If we have MPI output we need this counter to keep track of what MPI rank we are currently on
+    current_MPI_rank = 0
+    current_MPI_rank_tiffs = []
+
     for vtu in pvd:
         path = vtu
         vtu_file = ''
         if is_pvd:
-            vtu_file  = vtu.get('file')
+            vtu_file = vtu.get('file')
             path = input_path[:input_path.rfind('/')+1] + vtu_file
         else:
             base = os.path.basename(path) # since we have a full path to vtu, we need to get just the vtu filename
@@ -367,14 +401,14 @@ def main():
             tpoly = ogr.Geometry(ogr.wkbPolygon)
             tpoly.AddGeometry(ring)
 
-            feature = ogr.Feature( layer.GetLayerDefn() )
+            feature = ogr.Feature(layer.GetLayerDefn())
             feature.SetGeometry(tpoly)
 
             if variables is None:
                 variables = []
                 for j in range(0, cd.GetNumberOfArrays()):
                     name = cd.GetArrayName(j)
-                    if not '[param]' in name:
+                    if '[param]' not in name:
                         variables.append(name)
 
             for v in variables:
@@ -407,7 +441,7 @@ def main():
                 df = df.rename({'x':'lon','y':'lat'})
                 df.coords['time']=epoch + nc_time_counter*np.timedelta64(dt,'s') # this will automatically get converted to min or hours in the output nc
                 df.name=var
-                nc_rasters[var].append(df) # these are lazy loaded at the to netcdf call
+                nc_rasters[var].append(df) # these are lazy loaded at the to_netcdf call
 
                 # remove the tifs we produce
                 tifs_to_remove.append(target_fname)
@@ -439,7 +473,7 @@ def main():
 
         arr = xr.merge(datasets)
         print('Writing netCDF file')
-        fname=os.path.join(os.path.splitext(input_path)[0]+'.nc')
+        fname = os.path.join(os.path.splitext(input_path)[0]+'.nc')
         arr.to_netcdf(fname,engine='netcdf4')
 
         for f in tifs_to_remove:
