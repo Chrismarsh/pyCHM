@@ -32,7 +32,7 @@ matrix:
 before_install:
   - chmod +x .travis/install.sh
   - ./.travis/install.sh
-  - cd pyCHM && git checkout $TRAVIS_BRANCH
+  - (cd pyCHM && git checkout $TRAVIS_BRANCH)
 script:
   - if [ "$TRAVIS_OS_NAME" = "osx" ]; then eval "$(pyenv init -)"; pyenv activate pyCHM; fi
   - pip install --upgrade pip
