@@ -3,3 +3,7 @@
 /docs/doxygen/*
 /docs/_ext/__pycache__
 /.ipynb_checkpoints
+*.pyc
+/dask-worker-space
+/build
+/dist

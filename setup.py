@@ -16,7 +16,7 @@ def get_installed_gdal_version():
             )
 
 setup(
-    name='pyCHM',
+    name='CHM',
     version='0.0.1',
     description='python tools for CHM',
     license='MIT',
