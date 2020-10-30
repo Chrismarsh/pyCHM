@@ -16,6 +16,7 @@ matrix:
       python: "3.7"
     - <<: *linux
       python: "3.8"
+  allow_failures:
     - <<: *osx
       osx_image: xcode11.3
       env: 
