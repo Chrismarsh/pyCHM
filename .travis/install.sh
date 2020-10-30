@@ -10,7 +10,7 @@ if  [ "$TRAVIS_OS_NAME" = "osx" ]; then
 
     brew update || true
     brew upgrade || true
-    brew install gdal@3.1.3
+    brew install https://raw.githubusercontent.com/Homebrew/homebrew-core/29fecd97928e569ad007241a2474d9ceb272b7ee/Formula/gdal.rb # 3.1.3_4
     brew pin gdal
 
 
