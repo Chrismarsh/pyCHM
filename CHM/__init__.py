@@ -1,5 +1,3 @@
-import pyCHM.conversion
-
-from pyCHM.vtu import *
-import pyCHM.conversion as conversion
+from CHM.vtu import *
+import CHM.conversion as conversion
 
