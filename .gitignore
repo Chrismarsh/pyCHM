@@ -7,3 +7,4 @@
 /dask-worker-space
 /build
 /dist
+/pyCHM/__pycache__/*
