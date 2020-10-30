@@ -25,5 +25,8 @@ if  [ "$TRAVIS_OS_NAME" = "osx" ]; then
 else
   sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y;
   sudo apt-get update -qq
+  sudo apt-get install libgdal-dev
+  sudo apt-get install python-gdal
+  sudo apt-get install gdal-bin
   sudo apt-get install g++-7
 fi
