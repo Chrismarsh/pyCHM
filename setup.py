@@ -17,7 +17,7 @@ def get_installed_gdal_version():
 
 setup(
     name='CHM',
-    version='1.0.1',
+    version='1.0.2',
     description='python tools for CHM',
     license='MIT',
     packages=find_packages(),
@@ -25,6 +25,6 @@ setup(
     author_email='chris.marsh@usask.ca',
     install_requires=['vtk','numpy','xarray','netCDF4','pandas',
                       'pygdal'+get_installed_gdal_version(), 'dask[complete]',
-                      'pyvista', 'pyESMF==8.1.0.2b36','rioxarray','pandas','rasterio'],
+                      'pyvista', 'pyESMF~=8.1.0b36','rioxarray','pandas','rasterio'],
     scripts=["scripts/vtu2geo.py","scripts/windmapper2mesher.py"],
 )
