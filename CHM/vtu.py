@@ -9,8 +9,11 @@ import dask.array as da
 import re
 import ESMF
 import pathlib
-from rasterio.warp import transform
+
+#the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
 import rioxarray # for xarray.rio
+from rasterio.warp import transform
+
 
 def _get_shape(mesh, dxdy):
     # number of cells @ this dxdy
