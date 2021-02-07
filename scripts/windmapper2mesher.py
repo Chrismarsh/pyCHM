@@ -24,10 +24,15 @@ suffix = None
 basename = None
 for f in files:
     m = re.findall(r'[0-9]+', f)
-    m = m[-1]  #ensure we get the last number incase there are numbers in the filename
-    dirs.add(int(m))
-    
-   
+    m = int(m[-1])  #ensure we get the last number incase there are numbers in the filename
+
+    # the spd_up will have a pattern like
+    # ref-DEM-utm_0_spd_up_1000.vrt
+    # where the last number is actually not what we want.
+    # as we enumerate all the files, we will eventually find its pair, so we just skip adding 1000 to the dir set
+    if 360 >= m >= 0:
+        dirs.add(m)
+
     s = re.findall(r'spd_up_(.+)\.vrt', f)
     
     if suffix is None:
