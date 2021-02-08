@@ -11,6 +11,7 @@ Welcome to pyCHM's documentation!
    :caption: Contents:
    :hidden:
 
+   installation
    pyCHM
    tools
 
