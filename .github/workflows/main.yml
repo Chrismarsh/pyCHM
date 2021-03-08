@@ -46,9 +46,12 @@ jobs:
         use-conan: ['use-sys-lib']
 
         cfg:
-          - {os: "ubuntu-latest", compiler: "gcc", version: 7}
-          - {os: "ubuntu-latest", compiler: "gcc", version: 8}
-          - {os: "ubuntu-latest", compiler: "gcc", version: 9}
+          - {os: "ubuntu-18.04", compiler: "gcc", version: 7}
+          - {os: "ubuntu-18.04", compiler: "gcc", version: 8}
+          - {os: "ubuntu-18.04", compiler: "gcc", version: 9}
+          - {os: "ubuntu-20.04", compiler: "gcc", version: 7}
+          - {os: "ubuntu-20.04", compiler: "gcc", version: 8}
+          - {os: "ubuntu-20.04", compiler: "gcc", version: 9}
           - {os: "macos-latest", compiler: "apple-clang", version: "12.0"}
 
  
@@ -84,12 +87,20 @@ jobs:
           python -m pip install wheel
 
       - name: Install linux dependencies
-        if: ${{ matrix.cfg.os  == 'ubuntu-latest' }}
+        if: startsWith( matrix.cfg.os, 'ubuntu' )
+        env:
+          UBUNTU_VER: ${{ matrix.cfg.os }}
         run: | 
           export PATH="$pythonLocation:$PATH"
           sudo apt-get install libgdal-dev
-          sudo apt-get install python-gdal
+
           sudo apt-get install gdal-bin
+
+          if [[ "$UBUNTU_VER" = "ubuntu-20.04" ]]; then
+            sudo apt-get install python3-gdal
+          else
+            sudo apt-get install python-gdal
+          fi
 
 
       - name: Install macos dependencies
@@ -99,7 +110,7 @@ jobs:
           brew install gdal
 
       - name: env linux
-        if: ${{ matrix.cfg.os  == 'ubuntu-latest' }}
+        if: startsWith( matrix.cfg.os, 'ubuntu' )
         uses: allenevans/set-env@v2.0.0
         with:
           CC: gcc-${{ matrix.cfg.version }}
