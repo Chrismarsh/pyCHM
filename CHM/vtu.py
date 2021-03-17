@@ -146,6 +146,80 @@ def _build_regridding_ds(mesh, dxdy):
     return Emesh, grid
 
 
+def vtu_to_xarray(fname, dxdy=30, variables=None):
+    blocks = pv.MultiBlock([pv.read(fname)])
+
+    shape = _get_shape(blocks, dxdy)
+
+    proj4 = blocks[0]["proj4"][0]
+    print(f'proj4 = {proj4}')
+    if variables is not None:
+        # ensure we are not asking for an output that is a vector
+        for v in variables:
+            if len(blocks[0][v].shape) > 1:
+                raise Exception('Cannot specify a variable that is a vector output shape = (n,3) ')
+    else:
+        variables = []
+        blacklist = ['proj4', 'global_id']
+        for v in blocks[0].array_names:
+            if len(blocks[0][v].shape) == 1 and v not in blacklist:  # don't add the vectors
+                a = v.replace('[param] ', '_param_').replace('/',
+                                                             '')  # sanitize the name, this should be fixed in CHM though
+                variables.append(a)
+
+    delayed_vtu = {}
+    for var in variables:
+        delayed_vtu[var] = []
+
+    # cell centres
+    x_center = np.linspace(start=blocks.bounds[0] + dxdy / 2.,
+                           stop=blocks.bounds[1] - dxdy / 2., num=shape[0])
+    y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
+                           stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
+
+    vtu = _load_vtu([fname])
+
+    for var in variables:
+        df = _regrid_mesh_to_grid(vtu, dxdy, var)
+        d = da.from_delayed(df,
+                            shape=shape,
+                            dtype=np.dtype('float64'))
+
+        tmp = xr.DataArray(d.T, name=var,
+                           coords={'y': y_center,
+                                   'x': x_center},
+                           dims=['y', 'x'])
+
+        delayed_vtu[var].append(tmp)
+
+    epoch = np.datetime64(int(0), 's')
+    end_time = np.datetime64(int(0), 's')
+    dt = np.timedelta64(1, 's')
+
+    _dt = int(dt.astype("timedelta64[s]") / np.timedelta64(1, 's'))
+
+    times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
+
+    for var, arrays in delayed_vtu.items():
+        delayed_vtu[var] = xr.concat(arrays, dim=times)
+        delayed_vtu[var].chunk({'time': 1})
+
+    ds = xr.Dataset(data_vars=delayed_vtu)
+    ds = ds.rio.set_crs(proj4)
+    ds = ds.rio.write_crs(proj4)
+
+    # Compute the lon/lat coordinates with rasterio.warp.transform
+    ny, nx = len(ds['y']), len(ds['x'])
+    x, y = np.meshgrid(ds['x'], ds['y'])
+    # Rasterio works with 1D arrays
+    lon, lat = transform(ds.rio.crs, {'init': 'EPSG:4326'}, x.flatten(), y.flatten())
+    lon = np.asarray(lon).reshape((ny, nx))
+    lat = np.asarray(lat).reshape((ny, nx))
+    ds.coords['lon'] = (('y', 'x'), lon)
+    ds.coords['lat'] = (('y', 'x'), lat)
+
+
+    return ds
 
 def pvd_to_xarray(fname, dxdy=30, variables=None):
     """
@@ -268,6 +342,7 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
     ds = xr.Dataset(data_vars=delayed_vtu)
     ds = ds.rio.set_crs(proj4)
+    ds = ds.rio.write_crs(proj4)
 
     # Compute the lon/lat coordinates with rasterio.warp.transform
     ny, nx = len(ds['y']), len(ds['x'])
