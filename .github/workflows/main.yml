@@ -52,7 +52,7 @@ jobs:
           - {os: "ubuntu-20.04", compiler: "gcc", version: 7}
           - {os: "ubuntu-20.04", compiler: "gcc", version: 8}
           - {os: "ubuntu-20.04", compiler: "gcc", version: 9}
-          - {os: "macos-latest", compiler: "apple-clang", version: "12.0"}
+          - {os: "macos-10.15", compiler: "apple-clang", version: "12.0"}
 
  
     # Steps represent a sequence of tasks that will be executed as part of the job
@@ -86,6 +86,20 @@ jobs:
           python -m pip install ninja
           python -m pip install wheel
 
+      - name: Setup conan
+        run: |
+          conan profile new default --detect
+          conan config install https://github.com/Chrismarsh/conan-config.git
+
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            conan profile update settings.os.distro="$CFG_OS" default
+          else
+            conan profile update settings.os.version=`echo "$CFG_OS" | cut -d'-' -f2` default
+          fi
+          cat ~/.conan/profiles/default
+        env:
+          CFG_OS: ${{matrix.cfg.os}}
+
       - name: Install linux dependencies
         if: startsWith( matrix.cfg.os, 'ubuntu' )
         env:
@@ -104,7 +118,7 @@ jobs:
 
 
       - name: Install macos dependencies
-        if: ${{ matrix.cfg.os  == 'macos-latest' }}
+        if: startsWith( matrix.cfg.os, 'macos' )
         run: | 
           export PATH="$pythonLocation:$PATH"
           brew install gdal
@@ -117,7 +131,7 @@ jobs:
           CXX: g++-${{ matrix.cfg.version }}
 
       - name: env macos
-        if: ${{ matrix.cfg.os  == 'macos-latest' }}
+        if: startsWith( matrix.cfg.os, 'macos' )
         uses: allenevans/set-env@v2.0.0
         with:
           CONAN_APPLE_CLANG_VERSIONS: ${{ matrix.cfg.version }}
