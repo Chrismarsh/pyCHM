@@ -1,4 +1,4 @@
-import pyCHM as pc
+import CHM as pc
 
 df=pc.pvd_to_xarray('/Users/chris/Documents/science/code/SnowCast/v2/2_chm/output/meshes/SC.pvd',dxdy=300)
 s = df.isel(time=-1)

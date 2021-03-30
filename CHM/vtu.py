@@ -348,7 +348,7 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
     ny, nx = len(ds['y']), len(ds['x'])
     x, y = np.meshgrid(ds['x'], ds['y'])
     # Rasterio works with 1D arrays
-    lon, lat = transform(ds.rio.crs, {'init': 'EPSG:4326'}, x.flatten(), y.flatten())
+    lon, lat = transform(ds.rio.crs, 'EPSG:4326', x.flatten(), y.flatten())
     lon = np.asarray(lon).reshape((ny, nx))
     lat = np.asarray(lat).reshape((ny, nx))
     ds.coords['lon'] = (('y', 'x'), lon)
