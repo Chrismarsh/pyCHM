@@ -58,10 +58,10 @@ print(f'Using basename = {basename}')
 with open('config_WN.txt','w') as file:
     for i, ww in enumerate(dirs):
 
-        if(i==0):
-            i=ncat  
+        if i == 0:
+            i = ncat
 
-        for var in ['U','V','spd_up']:
+        for var in ['U', 'V', 'spd_up']:
 
             v = var
             if 'spd_up' in var:
@@ -76,6 +76,6 @@ with open('config_WN.txt','w') as file:
             if 'spd_up' not in var:
                 NinjaName = f'{NinjaName}_{var}'
 
-            line = "'%s' : {'file':'%s','method':'mean'}, \n" % (NinjaName,p)
+            line = "'%s' : {'file':'%s','method':'mean'}, \n" % (NinjaName, p)
             file.write(line)
             print(line)
