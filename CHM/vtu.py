@@ -338,7 +338,7 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
     for var, arrays in delayed_vtu.items():
         delayed_vtu[var] = xr.concat(arrays, dim=times)
-        delayed_vtu[var].chunk({'time':1})
+        delayed_vtu[var].chunk({'time':-1, 'x':-1, 'y':-1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
     ds = ds.rio.set_crs(proj4)
