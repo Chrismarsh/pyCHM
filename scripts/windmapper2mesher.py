@@ -33,7 +33,7 @@ for f in files:
     if 360 >= m >= 0:
         dirs.add(m)
 
-    s = re.findall(r'spd_up_(.+)\.vrt', f)
+    s = re.findall(r'spd_up_(.+)\.tif', f)
     
     if suffix is None:
         if len(s) > 0:
@@ -41,7 +41,7 @@ for f in files:
         
     #figure out our base path
     if basename is None:
-        m = re.findall(r'/(.+)_[0-9]+_[UV].vrt', f)
+        m = re.findall(r'/(.+)_[0-9]+_[UV]\.tif', f)
         if len(m) > 0:
             basename = m[-1]
         
@@ -67,7 +67,7 @@ with open('config_WN.txt','w') as file:
             if 'spd_up' in var:
                 v = f'{var}_{suffix}'
 
-            fname = f'{basename}_{ww}_{v}.vrt'
+            fname = f'{basename}_{ww}_{v}.tif'
 
             p = os.path.abspath(searchpath + '/' + fname)
 
