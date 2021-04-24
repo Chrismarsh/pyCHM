@@ -12,10 +12,10 @@ if len(sys.argv) == 1:
 
 searchpath = sys.argv[1]
 
-files = glob.glob(f'{searchpath}/*.vrt')
+files = glob.glob(f'{searchpath}/*.tif')
 
 if len(files) == 0:
-    print('No vrt files found')
+    print('No tif files found')
     exit(1)
 
 # Find the vrt files
@@ -24,7 +24,13 @@ suffix = None
 basename = None
 for f in files:
     m = re.findall(r'[0-9]+', f)
-    m = int(m[-1])  #ensure we get the last number incase there are numbers in the filename
+
+    try:
+        # ensure we get the last number incase there are numbers in the filename
+        m = int(m[-1])
+    except IndexError as e:
+        # the ref-DEM.tif file probably, keep going
+        continue
 
     # the spd_up will have a pattern like
     # ref-DEM-utm_0_spd_up_1000.vrt
