@@ -1,6 +1,7 @@
 from setuptools import setup
 import subprocess
 from setuptools import find_packages
+import glob
 
 def get_installed_gdal_version():
     try:
@@ -26,5 +27,5 @@ setup(
     install_requires=['vtk','numpy','xarray','netCDF4','pandas',
                       'pygdal-chm'+get_installed_gdal_version(), 'dask[complete]',
                       'pyvista', 'pyESMF~=8.1.0b36','rioxarray','pandas','rasterio', 'ninja'],
-    scripts=["scripts/vtu2geo.py","scripts/windmapper2mesher.py"],
+    scripts=glob.glob("scripts/*.py"),
 )
