@@ -81,7 +81,7 @@ jobs:
           python -m pip install conan --upgrade
           python -m pip install twine
           python -m pip install conan
-          python -m pip install scikit-build>=0.10.0
+          python -m pip install scikit-build>=0.11.1
           python -m pip install ninja
           python -m pip install wheel
 
