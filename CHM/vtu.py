@@ -14,6 +14,46 @@ import pathlib
 import rioxarray # for xarray.rio
 from rasterio.warp import transform
 
+@xr.register_dataset_accessor("chm")
+class GeoAccessor:
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+
+    def to_raster(self, var=None, crs_out=None):
+
+        def _dowork(d, crs_in, crs_out=None):
+            name = d.name
+
+            time = str(d.time.values[0]).split('.')[0]
+            d = d.rio.write_nodata(-9999)
+
+            if crs_out is not None:
+                tmp = d.squeeze().drop('lat').drop('lon').drop('time')
+                tmp.rio.set_crs(crs_in)
+                tmp = tmp.rio.reproject(crs_out)
+            else:
+                tmp = d
+
+            tmp_tiff = f'{name}_{time}.tif'
+            tmp.rio.to_raster(tmp_tiff)
+
+            # exec = f"""{gdalwarp} -t_srs EPSG:26911 -srcnodata '-9999' {tmp_tiff}  output_{var}_{time}.tif"""
+            # subprocess.check_call([exec], shell=True)
+
+            # os.remove(tmp_tiff)
+
+            return d
+
+        if var is None:
+            var = list(self._obj.keys())
+        elif var is not isinstance(object, list):
+            var = [var]
+
+        for v in var:
+            print(v)
+            df = self._obj[v]
+            mapped = xr.map_blocks(_dowork, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
+            mapped.compute()
 
 def _get_shape(mesh, dxdy):
     # number of cells @ this dxdy
@@ -28,16 +68,16 @@ def _get_shape(mesh, dxdy):
 
 @dask.delayed
 def _load_vtu(fname):
-    # print('actually loading vtu ' + fname[0])
+    # print('Loading and combining vtu...',end='')
     vtu = pv.MultiBlock([pv.read(f) for f in fname])
     vtu = vtu.combine()
     return vtu
 
 
 @dask.delayed
-def _regrid_mesh_to_grid(vtu, dxdy, var):
+def _regrid_mesh_to_grid(vtu, dxdy, var, mesh, grid):
 
-    # print('regrid triggered')
+    # print('_regrid_mesh_to_grid called')
     mesh, grid = _build_regridding_ds(vtu, dxdy)
 
     srcfield = ESMF.Field(mesh, name=var, meshloc=ESMF.MeshLoc.ELEMENT)
@@ -59,9 +99,7 @@ def _regrid_mesh_to_grid(vtu, dxdy, var):
 
 # @dask.delayed
 def _build_regridding_ds(mesh, dxdy):
-
-    # mesh = pv.MultiBlock([pv.read(f) for f in fname])
-    # mesh = mesh.combine()
+    # print('_build_regridding_ds called')
 
     nodes, elements = (0, 1)
     u, v = (0, 1)
@@ -229,6 +267,12 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
     :return:
     """
 
+    try:
+        if dask.config.get('scheduler') != 'processes':
+            raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
+    except:
+        raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
+
     # see if we were given a single vtu file or a pvd xml file
     filename, file_extension = os.path.splitext(fname)
 
@@ -261,7 +305,7 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
         else:
             break
 
-    print(f'MPI ranks = {len(ranks)} detected in vtu')
+    print(f'MPI ranks = {len(ranks)} detected in pvd')
     nranks = len(ranks)
 
     if len(timesteps) > 1 and len(timesteps) > nranks:
@@ -280,9 +324,11 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
         vtu_paths.append(current_vtu_paths)
 
+    print('Determining mesh extents...',end='')
     blocks = pv.MultiBlock([pv.read(f) for f in vtu_paths[0]])
 
     shape = _get_shape(blocks, dxdy)
+
 
     proj4 = blocks[0]["proj4"][0]
     print(f'proj4 = {proj4}')
@@ -310,15 +356,22 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
     y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
                            stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
 
+# This can't be done here as it can't be pickled
+    # print(f'Building regridding ds' )
+    # v = _load_vtu(vtu_paths[0])
+    # mesh, grid = _build_regridding_ds(v.compute(), dxdy)
+
 
     blocks = None
     for v in vtu_paths:
 
         # print(v)
+        # This prevents pickling
         vtu = _load_vtu(v)
 
         for var in variables:
-            df = _regrid_mesh_to_grid(vtu, dxdy, var)
+            # vtu = _load_vtu(v)  # can done here to pickle, but then will end up writting all variables as bands
+            df = _regrid_mesh_to_grid(vtu, dxdy, var, None, None)
             d = da.from_delayed(df,
                                 shape=shape,
                                 dtype=np.dtype('float64'))
@@ -327,7 +380,6 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
                                coords={'y': y_center,
                                        'x': x_center},
                                dims=['y', 'x'])
-
             delayed_vtu[var].append(tmp)
 
     end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
@@ -338,11 +390,21 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
     for var, arrays in delayed_vtu.items():
         delayed_vtu[var] = xr.concat(arrays, dim=times)
-        delayed_vtu[var].chunk({'time':-1, 'x':-1, 'y':-1})
+        delayed_vtu[var].chunk({'time': 1, 'x':-1, 'y':-1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
-    ds = ds.rio.set_crs(proj4)
-    ds = ds.rio.write_crs(proj4)
+
+    # This is dumb, but we need to set the proj4 on each sub data array after we maek the ds.
+    # setting it earlier or on the ds doesn't work for the sub DAs
+    for var in variables:
+        ds[var].rio.set_crs(proj4)
+
+#these are both inplace=True by default
+    # sets internal rio crs
+    ds.rio.set_crs(proj4)
+
+    # writes CRS in a CF compliant manner
+    ds.rio.write_crs(proj4)
 
     # Compute the lon/lat coordinates with rasterio.warp.transform
     ny, nx = len(ds['y']), len(ds['x'])
