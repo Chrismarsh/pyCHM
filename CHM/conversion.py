@@ -7,7 +7,8 @@ import datetime
 
 def pts_dir_to_nc(path, output_nc, UTC_offset=0):
     """
-    Converts a out put points directory to a netcdf file
+    Converts an output points directory to a netcdf file
+
     :param path:
     :param output_nc:
     :param UTC_offset:
@@ -21,6 +22,7 @@ def pts_dir_to_nc(path, output_nc, UTC_offset=0):
 def pts_dir_to_pd(path,  UTC_offset=0):
     """
     Converts an output points directory to a Pandas dataframe
+
     :param path:
     :param UTC_offset:
     :return:
@@ -33,6 +35,7 @@ def pts_dir_to_pd(path,  UTC_offset=0):
 def pts_to_pd(files, UTC_offset = 0):
     """
     Loads output point files into one large Pandas data frame
+
     :param files: List of input files
     :param output_nc:
     :param UTC_offset:
@@ -76,6 +79,7 @@ def pts_to_pd(files, UTC_offset = 0):
 def pts_to_nc(files, output_nc, UTC_offset = 0):
     """
     Converts the point file to a netcdf file
+
     :param files: List of files
     :param output_nc: Output netcdf file
     :param UTC_offset: Conversion of UTC to desired timeframe
