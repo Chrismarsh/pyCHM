@@ -6,13 +6,16 @@
 Welcome to pyCHM's documentation!
 =================================
 
+This Python package provides python tooling for working with the `Canadian Hydrological Model (CHM) <https://chm.readthedocs.io/en/dev/>`_.
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
    :hidden:
 
    installation
-   pyCHM
+   vtu
+   ptconversion
    tools
 
 
