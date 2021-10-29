@@ -4,8 +4,10 @@ import os
 import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
+
 import dask
 import dask.array as da
+
 import re
 import ESMF
 import pathlib
@@ -34,12 +36,12 @@ class GeoAccessor:
         :return:
         """
 
+
         def _dowork(d, crs_in, crs_out=None):
             name = d.name
 
             time = str(d.time.values[0]).split('.')[0]
             d = d.rio.write_nodata(-9999)
-
             if crs_out is not None:
                 tmp = d.squeeze().drop('lat').drop('lon').drop('time')
                 tmp.rio.set_crs(crs_in)
@@ -50,11 +52,6 @@ class GeoAccessor:
             tmp_tiff = f'{name}_{time}.tif'
             tmp.rio.to_raster(tmp_tiff)
 
-            # exec = f"""{gdalwarp} -t_srs EPSG:26911 -srcnodata '-9999' {tmp_tiff}  output_{var}_{time}.tif"""
-            # subprocess.check_call([exec], shell=True)
-
-            # os.remove(tmp_tiff)
-
             return d
 
         if var is None:
@@ -62,11 +59,16 @@ class GeoAccessor:
         elif var is not isinstance(object, list):
             var = [var]
 
+        work = []
+
         for v in var:
-            print(v)
             df = self._obj[v]
             mapped = xr.map_blocks(_dowork, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
-            mapped.compute()
+            work.append(mapped)
+            # mapped.compute()
+
+        dask.compute(*work)
+
 
 def _get_shape(mesh, dxdy):
     # number of cells @ this dxdy
@@ -385,10 +387,10 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
         # print(v)
         # This prevents pickling
-        vtu = _load_vtu(v)
+        # vtu = _load_vtu(v)
 
         for var in variables:
-            # vtu = _load_vtu(v)  # can done here to pickle, but then will end up writting all variables as bands
+            vtu = _load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
             df = _regrid_mesh_to_grid(vtu, dxdy, var, None, None)
             d = da.from_delayed(df,
                                 shape=shape,
