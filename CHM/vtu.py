@@ -16,10 +16,23 @@ from rasterio.warp import transform
 
 @xr.register_dataset_accessor("chm")
 class GeoAccessor:
+    """
+    xarray extension. Accessed via `.chm` on a dataframe. E.g., ``df.chm.to_raster(...)``
+
+    """
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
     def to_raster(self, var=None, crs_out=None):
+        """
+        Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
+        Will work on every timestep in parallel. Doing so requires dask to be configured to use processes and not threads, as the underlying regridding algorithm is not
+        thread safe.
+
+        :param var: List of variables to convert, otherwise all are converted
+        :param crs_out: Output CRS to reproject to, otherwise uses source CRS
+        :return:
+        """
 
         def _dowork(d, crs_in, crs_out=None):
             name = d.name
@@ -259,11 +272,16 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
 
     return ds
 
-def pvd_to_xarray(fname, dxdy=30, variables=None):
+def pvd_to_xarray(fname, dxdy=50, variables=None):
     """
-    Opens a single vtu file or a pvd file and returns a delayed xarray object
-    timestep basis
+    Opens a pvd file and returns a Dask delayed xarray object. As it is a delayed object,
+    once a specific timestep's variable is operated upon, the delayed object is computed
+    and regridded.
+
+
     :param fname: pvd file path
+    :param dxdy: spatial resolution in metres to regrid to.
+    :para variables: List of variables to keep from the loaded vtu file
     :return:
     """
 
@@ -394,27 +412,27 @@ def pvd_to_xarray(fname, dxdy=30, variables=None):
 
     ds = xr.Dataset(data_vars=delayed_vtu)
 
-    # This is dumb, but we need to set the proj4 on each sub data array after we maek the ds.
-    # setting it earlier or on the ds doesn't work for the sub DAs
-    for var in variables:
-        ds[var].rio.set_crs(proj4)
-
-#these are both inplace=True by default
-    # sets internal rio crs
-    ds.rio.set_crs(proj4)
-
-    # writes CRS in a CF compliant manner
-    ds.rio.write_crs(proj4)
-
     # Compute the lon/lat coordinates with rasterio.warp.transform
     ny, nx = len(ds['y']), len(ds['x'])
     x, y = np.meshgrid(ds['x'], ds['y'])
     # Rasterio works with 1D arrays
-    lon, lat = transform(ds.rio.crs, 'EPSG:4326', x.flatten(), y.flatten())
+    lon, lat = transform(proj4, 'EPSG:4326', x.flatten(), y.flatten())
     lon = np.asarray(lon).reshape((ny, nx))
     lat = np.asarray(lat).reshape((ny, nx))
     ds.coords['lon'] = (('y', 'x'), lon)
     ds.coords['lat'] = (('y', 'x'), lat)
+
+    # we need to be really careful when do this assignment as these attrs can be easily lost, see:
+    # https://github.com/corteva/rioxarray/issues/427
+    # https://corteva.github.io/rioxarray/stable/getting_started/crs_management.html
+    # https://corteva.github.io/rioxarray/stable/getting_started/manage_information_loss.html
+
+    # sets internal rio crs
+    ds = ds.rio.set_crs(proj4)
+
+    # writes CRS in a CF compliant manner
+    ds = ds.rio.write_crs(proj4)
+
 
     return ds
 
