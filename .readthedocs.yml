@@ -25,3 +25,4 @@ build:
     - gdal-bin
     - python-gdal
     - cmake
+    - gfortran
