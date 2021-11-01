@@ -18,3 +18,9 @@ python:
    version: 3.7
    install:
    - requirements: requirements.txt
+
+build:
+  apt_packages:
+    - libgdal-dev
+    - gdal-bin
+    - python-gdal
