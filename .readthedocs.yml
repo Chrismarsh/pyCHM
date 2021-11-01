@@ -24,3 +24,4 @@ build:
     - libgdal-dev
     - gdal-bin
     - python-gdal
+    - cmake
