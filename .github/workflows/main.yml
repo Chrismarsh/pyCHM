@@ -15,7 +15,6 @@ on:
 
 env:
   MAKEFLAGS: "-j2"
-  CONAN_BASE_PROFILE: "chm_no_mpi"
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -81,7 +80,7 @@ jobs:
         with:
           TEST_CONDA: ${{ matrix.test-conda }}
 
-      - name: Install python build env
+      - name: Install pythion build env
         run: |
           export PATH="$pythonLocation:$PATH"
           python -m pip install conan --upgrade
@@ -152,7 +151,6 @@ jobs:
           cat ~/.conan/profiles/default
         env:
           CFG_OS: ${{matrix.cfg.os}}
-
 
       - name: Install and test
         run: |
