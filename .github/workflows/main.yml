@@ -18,7 +18,6 @@ env:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  
 
   # This workflow contains a single job called "build"
   build:
@@ -42,7 +41,7 @@ jobs:
       matrix:
 
         python-version: [3.7, 3.8]
-        test-conda: ["conda-python","sys-python"]
+        test-conda: ["sys-python"] #"conda-python",
         use-conan: ['use-sys-lib']
 
         cfg:
@@ -51,7 +50,8 @@ jobs:
           - {os: "ubuntu-18.04", compiler: "gcc", version: 10}
           - {os: "ubuntu-20.04", compiler: "gcc", version: 9}
           - {os: "ubuntu-20.04", compiler: "gcc", version: 10}
-          - {os: "macos-10.15", compiler: "apple-clang", version: "12.0"}
+          - {os: "macos-10.15",  compiler: "apple-clang", version: "12.0"}
+          - {os: "macos-11",     compiler: "apple-clang", version: "13.0"}
 
  
     # Steps represent a sequence of tasks that will be executed as part of the job
@@ -75,7 +75,12 @@ jobs:
           activate-environment: mesher-env
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Set envar
+        uses: allenevans/set-env@v2.0.0
+        with:
+          TEST_CONDA: ${{ matrix.test-conda }}
+
+      - name: Install pythion build env
         run: |
           export PATH="$pythonLocation:$PATH"
           python -m pip install conan --upgrade
@@ -85,68 +90,76 @@ jobs:
           python -m pip install ninja
           python -m pip install wheel
 
-      - name: Setup conan
-        run: |
-          conan profile new default --detect
-          conan config install https://github.com/Chrismarsh/conan-config.git
-
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            conan profile update settings.os.distro="$CFG_OS" default
-          else
-            conan profile update settings.os.version=`echo "$CFG_OS" | cut -d'-' -f2` default
-          fi
-          cat ~/.conan/profiles/default
-        env:
-          CFG_OS: ${{matrix.cfg.os}}
-
       - name: Install linux dependencies
         if: startsWith( matrix.cfg.os, 'ubuntu' )
         env:
           UBUNTU_VER: ${{ matrix.cfg.os }}
-        run: | 
+        run: |
           export PATH="$pythonLocation:$PATH"
           sudo apt-get update
+          sudo env ACCEPT_EULA=Y apt-get upgrade -y
+          sudo apt-get update
           sudo apt-get install libgdal-dev
-
           sudo apt-get install gdal-bin
-
+        
           if [[ "$UBUNTU_VER" = "ubuntu-20.04" ]]; then
             sudo apt-get install python3-gdal
           else
             sudo apt-get install python-gdal
           fi
 
-
       - name: Install macos dependencies
         if: startsWith( matrix.cfg.os, 'macos' )
-        run: | 
+        run: |
           export PATH="$pythonLocation:$PATH"
           brew install gdal
+          brew install ninja
 
       - name: env linux
         if: startsWith( matrix.cfg.os, 'ubuntu' )
         uses: allenevans/set-env@v2.0.0
         with:
+          CONAN_GCC_VERSIONS: ${{ matrix.cfg.version }}
           CC: gcc-${{ matrix.cfg.version }}
           CXX: g++-${{ matrix.cfg.version }}
+          GFORTRAN_NAME: gfortran-${{ matrix.cfg.version }}
 
       - name: env macos
         if: startsWith( matrix.cfg.os, 'macos' )
         uses: allenevans/set-env@v2.0.0
         with:
           CONAN_APPLE_CLANG_VERSIONS: ${{ matrix.cfg.version }}
-    
-      - name: Set envar
-        uses: allenevans/set-env@v2.0.0
-        with:
-          TEST_CONDA: ${{ matrix.test-conda }}
+          GFORTRAN_NAME: gfortran-10 # set the name to use for gfortran as we need to use gfotran-<version>
 
-#      - name: Install and test
-#        run: |
-#          export PATH="$pythonLocation:$PATH"
-#          python -m pip install .
-#          python -c 'import CHM as pc'
-        
+      # we need a working conan env for our dependencies like ESMF
+      - name: Setup conan
+        run: |
+          conan profile new default --detect
+          conan config install https://github.com/Chrismarsh/conan-config.git
+          
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            conan profile update settings.os.distro="$CFG_OS" default
+          else
+            VERSION=$(echo "$CFG_OS" | cut -d'-' -f2)
+            echo "MacOS $VERSION"
+            if [[ "$VERSION" == "11" ]]; 
+            then 
+              VERSION="11.0"
+            fi
+            conan profile update settings.os.version="$VERSION" default
+          fi
+          cat ~/.conan/profiles/default
+        env:
+          CFG_OS: ${{matrix.cfg.os}}
+
+      - name: Install and test
+        run: |
+          export PATH="$pythonLocation:$PATH"
+          python setup.py sdist
+          VERSION=$(grep 'version=' setup.py | cut -d\' -f2)
+          python -m pip install dist/CHM-$VERSION.tar.gz 
+          
+          python -c 'import CHM as pc'
 
       - name: Deploy
         run: |
