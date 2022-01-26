@@ -26,6 +26,6 @@ setup(
     author_email='chris.marsh@usask.ca',
     install_requires=['vtk','numpy','xarray>=0.18.1','netCDF4','pandas',
                       'pygdal-chm'+get_installed_gdal_version(), 'dask[complete]',
-                      'pyvista>0.29', 'pyESMF~=8.2.1','rioxarray','rasterio', 'ninja'],
+                      'pyvista>0.29', 'pyESMF==8.2.1b03','rioxarray','rasterio', 'ninja'],
     scripts=glob.glob("scripts/*.py"),
 )
