@@ -1,8 +1,9 @@
+#!/usr/bin/env python
+
 import glob
 import re
 
-header = """
-<?xml version="1.0" encoding="utf-8"?>
+header = """<?xml version="1.0" encoding="utf-8"?>
 <VTKFile type="Collection" version="0.1">
     <Collection>
 """
@@ -12,21 +13,27 @@ footer = """
 </VTKFile>
 """
 
-dataset = {}
+dataset = []
+
+# We are making the assumption these are modern CHM files in the format <prefix><unix time>_<MPI rank>.vtu
 
 for f in glob.glob('*.vtu'):
-    # print(f)
-    item =  """         <DataSet timestep="%s" group="" part="0" file="%s"/>\n"""
     m = re.findall(r'[0-9]+', f)
-    item = item % (m[0], f)
-    dataset[int(m[1])] = item
-    # print(item)
+    ts = int(m[0])
+    rank = int(m[1])
 
-s = sorted(dataset.keys())
+    item = """         <DataSet timestep="%s" group="" part="%s" file="%s"/>\n"""
+
+    item = item % (ts, rank, f)
+
+    dataset.append( (ts,rank, item) )
+
+dataset.sort(key=lambda tup: (tup[0], tup[1]) )
+
 
 with open('out.pvd','w') as file:
     file.write(header)
-    for i in s:
-        file.write(dataset[i])
+    for i in dataset:
+        file.write( i[2] )
     file.write(footer)
 

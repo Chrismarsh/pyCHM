@@ -25,6 +25,7 @@ class GeoAccessor:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
+
     def to_raster(self, var=None, crs_out=None):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
@@ -37,7 +38,7 @@ class GeoAccessor:
         """
 
 
-        def _dowork(d, crs_in, crs_out=None):
+        def _dowork_toraster(d, crs_in, crs_out=None):
             name = d.name
 
             time = str(d.time.values[0]).split('.')[0]
@@ -63,7 +64,7 @@ class GeoAccessor:
 
         for v in var:
             df = self._obj[v]
-            mapped = xr.map_blocks(_dowork, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
+            mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
             work.append(mapped)
             # mapped.compute()
 
