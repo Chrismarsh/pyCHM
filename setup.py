@@ -2,7 +2,7 @@ from setuptools import setup
 import subprocess
 from setuptools import find_packages
 import glob
-import packaging
+import packaging.version
 
 def get_installed_gdal_version():
     try:

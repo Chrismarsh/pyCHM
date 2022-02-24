@@ -81,7 +81,7 @@ jobs:
         with:
           TEST_CONDA: ${{ matrix.test-conda }}
 
-      - name: Install pythion build env
+      - name: Install python build env
         run: |
           export PATH="$pythonLocation:$PATH"
           python -m pip install conan --upgrade
