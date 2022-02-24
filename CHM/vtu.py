@@ -43,14 +43,14 @@ class GeoAccessor:
 
             time = str(d.time.values[0]).split('.')[0]
             d = d.rio.write_nodata(-9999)
+            dxdy = d.coords['dxdy'].values
             if crs_out is not None:
                 tmp = d.squeeze().drop('lat').drop('lon').drop('time')
                 tmp.rio.set_crs(crs_in)
                 tmp = tmp.rio.reproject(crs_out)
             else:
                 tmp = d
-
-            tmp_tiff = f'{name}_{time}.tif'
+            tmp_tiff = f'{name}_{dxdy}x{dxdy}_{time}.tif'
             tmp.rio.to_raster(tmp_tiff)
 
             return d
@@ -61,7 +61,6 @@ class GeoAccessor:
             var = [var]
 
         work = []
-
         for v in var:
             df = self._obj[v]
             mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
@@ -272,6 +271,14 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
     ds.coords['lon'] = (('y', 'x'), lon)
     ds.coords['lat'] = (('y', 'x'), lat)
 
+    # Because the geo accessor can so easily lose information, set it like this so it is easily obtained
+    ds = ds.assign_coords({'dxdy': dxdy})
+
+    # sets internal rio crs
+    ds = ds.rio.set_crs(proj4)
+
+    # writes CRS in a CF compliant manner
+    ds = ds.rio.write_crs(proj4)
 
     return ds
 
@@ -401,6 +408,7 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
                                coords={'y': y_center,
                                        'x': x_center},
                                dims=['y', 'x'])
+
             delayed_vtu[var].append(tmp)
 
     end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
@@ -424,6 +432,10 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     lat = np.asarray(lat).reshape((ny, nx))
     ds.coords['lon'] = (('y', 'x'), lon)
     ds.coords['lat'] = (('y', 'x'), lat)
+
+    # Because the geo accessor can so easily lose information, set it like this so it is easily obtained
+    ds = ds.assign_coords({'dxdy': dxdy})
+
 
     # we need to be really careful when do this assignment as these attrs can be easily lost, see:
     # https://github.com/corteva/rioxarray/issues/427
