@@ -42,6 +42,7 @@ class GeoAccessor:
             name = d.name
 
             time = str(d.time.values[0]).split('.')[0]
+            time = time.replace(':','')
             d = d.rio.write_nodata(-9999)
             dxdy = d.coords['dxdy'].values
             if crs_out is not None:
