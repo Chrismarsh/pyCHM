@@ -9,7 +9,7 @@ def get_installed_gdal_version():
         version = subprocess.run(["gdal-config","--version"], stdout=subprocess.PIPE).stdout.decode()
 
         version = version.replace('\n', '')
-        #pygdal don'ts always have the most up todate version so we will need to swtich to pygdal-chm if it is not available
+        #pygdal doesn't always have the most up todate version so we will need to swtich to pygdal-chm if it is not available
         # 3.3.2 is most recent as of this version
         chm=''
         if packaging.version.parse(version) > packaging.version.parse("3.3.2"):
