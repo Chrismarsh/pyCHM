@@ -12,9 +12,10 @@ import re
 import ESMF
 import pathlib
 
-#the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
-import rioxarray # for xarray.rio
+# the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
+import rioxarray  # for xarray.rio
 from rasterio.warp import transform
+
 
 @xr.register_dataset_accessor("chm")
 class GeoAccessor:
@@ -22,27 +23,38 @@ class GeoAccessor:
     xarray extension. Accessed via `.chm` on a dataframe. E.g., ``df.chm.to_raster(...)``
 
     """
+
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
+    def get_dxdy(self):
+        dxdy = self._obj.coords['dxdy'].values
+        return dxdy
 
-    def to_raster(self, var=None, crs_out=None):
+    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S'):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
         Will work on every timestep in parallel. Doing so requires dask to be configured to use processes and not threads, as the underlying regridding algorithm is not
         thread safe.
 
+        :param timefrmtstr: Time format string for output
         :param var: List of variables to convert, otherwise all are converted
         :param crs_out: Output CRS to reproject to, otherwise uses source CRS
         :return:
         """
 
-
-        def _dowork_toraster(d, crs_in, crs_out=None):
+        def _dowork_toraster(d, crs_in, timefrmtstr, crs_out=None):
             name = d.name
 
-            time = str(d.time.values[0]).split('.')[0]
-            time = time.replace(':','')
+            # this almost always comes as a single length vector but, sometimes, a scalar. No idea
+            try:
+                t = d.time.values[0]
+            except IndexError as e:
+                t = d.time.values
+
+            time = pd.to_datetime(str(t))
+            time = time.strftime(timefrmtstr)
+
             d = d.rio.write_nodata(-9999)
             dxdy = d.coords['dxdy'].values
             if crs_out is not None:
@@ -64,7 +76,7 @@ class GeoAccessor:
         work = []
         for v in var:
             df = self._obj[v]
-            mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
+            mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'timefrmtstr': timefrmtstr, 'crs_out': crs_out}, template=df)
             work.append(mapped)
             # mapped.compute()
 
@@ -79,7 +91,7 @@ def _get_shape(mesh, dxdy):
     x = np.abs(mesh.bounds[0] - mesh.bounds[1])
     y = np.abs(mesh.bounds[2] - mesh.bounds[3])
 
-    return int(x/dxdy),int(y/dxdy)
+    return int(x / dxdy), int(y / dxdy)
 
 
 @dask.delayed
@@ -92,7 +104,6 @@ def _load_vtu(fname):
 
 @dask.delayed
 def _regrid_mesh_to_grid(vtu, dxdy, var, mesh, grid):
-
     # print('_regrid_mesh_to_grid called')
     mesh, grid = _build_regridding_ds(vtu, dxdy)
 
@@ -112,6 +123,7 @@ def _regrid_mesh_to_grid(vtu, dxdy, var, mesh, grid):
     df = da.from_array(out.data)
 
     return df
+
 
 # @dask.delayed
 def _build_regridding_ds(mesh, dxdy):
@@ -164,7 +176,6 @@ def _build_regridding_ds(mesh, dxdy):
     numX, numY = _get_shape(mesh, dxdy)
     # numX = int((Emesh.coords[nodes][u].max() - Emesh.coords[nodes][u].min()) / dxdy)
     # numY = int((Emesh.coords[nodes][v].max() - Emesh.coords[nodes][v].min()) / dxdy)
-
 
     # cell centres
     x_center = np.linspace(start=Emesh.coords[nodes][u].min() + dxdy / 2.,
@@ -283,6 +294,7 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
 
     return ds
 
+
 def pvd_to_xarray(fname, dxdy=50, variables=None):
     """
     Opens a pvd file and returns a Dask delayed xarray object. As it is a delayed object,
@@ -298,15 +310,15 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
     try:
         if dask.config.get('scheduler') != 'processes':
-            raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
+            raise ("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
     except:
-        raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
+        raise ("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
 
     # see if we were given a single vtu file or a pvd xml file
     filename, file_extension = os.path.splitext(fname)
 
     timesteps = None
-    dt = np.timedelta64(1,'s')
+    dt = np.timedelta64(1, 's')
 
     if file_extension != '.pvd':
         raise Exception('Not a pvd file')
@@ -338,8 +350,8 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     nranks = len(ranks)
 
     if len(timesteps) > 1 and len(timesteps) > nranks:
-        dt = np.datetime64(int(timesteps[nranks].get('timestep')),'s') - np.datetime64(int(timesteps[0].get('timestep')),'s')
-        print('dt='+str(dt))
+        dt = np.datetime64(int(timesteps[nranks].get('timestep')), 's') - np.datetime64(int(timesteps[0].get('timestep')), 's')
+        print('dt=' + str(dt))
     vtu_paths = []
 
     base_dir = pathlib.Path(fname).parent.absolute()
@@ -353,11 +365,10 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
         vtu_paths.append(current_vtu_paths)
 
-    print('Determining mesh extents...',end='')
+    print('Determining mesh extents...', end='')
     blocks = pv.MultiBlock([pv.read(f) for f in vtu_paths[0]])
 
     shape = _get_shape(blocks, dxdy)
-
 
     proj4 = blocks[0]["proj4"][0]
     print(f'proj4 = {proj4}')
@@ -370,10 +381,9 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
         variables = []
         blacklist = ['proj4', 'global_id']
         for v in blocks[0].array_names:
-            if len(blocks[0][v].shape) == 1 and v not in blacklist: # don't add the vectors
-                a = v.replace('[param] ','_param_').replace('/','') # sanitize the name, this should be fixed in CHM though
+            if len(blocks[0][v].shape) == 1 and v not in blacklist:  # don't add the vectors
+                a = v.replace('[param] ', '_param_').replace('/', '')  # sanitize the name, this should be fixed in CHM though
                 variables.append(a)
-
 
     delayed_vtu = {}
     for var in variables:
@@ -385,11 +395,10 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
                            stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
 
-# This can't be done here as it can't be pickled
+    # This can't be done here as it can't be pickled
     # print(f'Building regridding ds' )
     # v = _load_vtu(vtu_paths[0])
     # mesh, grid = _build_regridding_ds(v.compute(), dxdy)
-
 
     blocks = None
     for v in vtu_paths:
@@ -414,13 +423,13 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
     end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
 
-    _dt = int(dt.astype("timedelta64[s]")/np.timedelta64(1, 's'))
+    _dt = int(dt.astype("timedelta64[s]") / np.timedelta64(1, 's'))
 
-    times = pd.date_range(start = epoch, end = end_time, freq= f'{_dt} s' , name="time")
+    times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
 
     for var, arrays in delayed_vtu.items():
         delayed_vtu[var] = xr.concat(arrays, dim=times)
-        delayed_vtu[var].chunk({'time': 1, 'x':-1, 'y':-1})
+        delayed_vtu[var].chunk({'time': 1, 'x': -1, 'y': -1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
 
@@ -437,7 +446,6 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     # Because the geo accessor can so easily lose information, set it like this so it is easily obtained
     ds = ds.assign_coords({'dxdy': dxdy})
 
-
     # we need to be really careful when do this assignment as these attrs can be easily lost, see:
     # https://github.com/corteva/rioxarray/issues/427
     # https://corteva.github.io/rioxarray/stable/getting_started/crs_management.html
@@ -449,8 +457,4 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     # writes CRS in a CF compliant manner
     ds = ds.rio.write_crs(proj4)
 
-
     return ds
-
-
-
