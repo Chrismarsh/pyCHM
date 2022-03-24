@@ -1,17 +1,16 @@
-# import CHM as pc
+import sys
+sys.path.append("/Users/chris/Documents/science/code/pyCHM/")
+import dask
 import CHM as pc
 
-# df=pc.pvd_to_xarray('/Users/chris/Documents/science/model_runs/benchmark_problems/granger_pbsm_synthetic/output/meshes/granger.pvd',dxdy=10)
-df=pc.pvd_to_xarray('/Users/chris/Documents/science/model_runs/UBC_Peter_White/output/SC.pvd',dxdy=540)
+dask.config.set(scheduler='processes')
+if __name__ == '__main__':
+    # df=pc.pvd_to_xarray('/Users/chris/Documents/science/model_runs/benchmark_problems/granger_pbsm_synthetic/output/meshes/granger.pvd',dxdy=10)
+    df=pc.pvd_to_xarray('/Users/chris/Documents/science/model_runs/benchmark_problems/kan_pbsm_TC2020/BSCor3_Alb100_NoSubTopo_NoPomLi_K0p3_NoCplz0_Recirc20_WN1000_24/reference'
+                        '/SC.pvd', dxdy=2500, variables=['swe'])
 
 
-s = df.isel(time=-1)
-
-all_var = set([x for x in s.data_vars.keys()])
-keep_var = set( ['swe'] )
-
-# figure out what to drop
-drop = all_var - keep_var
-s = s.drop_vars(drop)
-
-s['swe'].rio.to_raster('swe.tif')
+    print('done pvd load')
+    s = df.isel(time=-1)
+    s.chm.to_raster(crs_out='EPSG:4326')
+    print('done')
