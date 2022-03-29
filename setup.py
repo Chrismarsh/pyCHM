@@ -10,7 +10,6 @@ def get_installed_gdal_version():
 
         version = version.replace('\n', '')
         # pygdal doesn't always have the most up todate version so we will need to swtich to pygdal-chm if it is not available
-        # 3.3.2 is most recent as of this version
         chm = ''
         if packaging.version.parse(version) > packaging.version.parse("3.4.1"):
             chm = '-chm'
@@ -26,7 +25,7 @@ def get_installed_gdal_version():
 
 setup(
     name='CHM',
-    version='1.0.20',
+    version='1.0.21',
     description='python tools for CHM',
     license='MIT',
     packages=find_packages(),

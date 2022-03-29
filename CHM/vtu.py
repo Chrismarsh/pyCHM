@@ -12,8 +12,8 @@ import re
 import ESMF
 import pathlib
 
-#the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
-import rioxarray # for xarray.rio
+# the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
+import rioxarray  # for xarray.rio
 from rasterio.warp import transform
 
 @xr.register_dataset_accessor("chm")
@@ -25,24 +25,36 @@ class GeoAccessor:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
+    def get_dxdy(self):
+        dxdy = self._obj.coords['dxdy'].values
+        return dxdy
 
-    def to_raster(self, var=None, crs_out=None):
+    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S'):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
         Will work on every timestep in parallel. Doing so requires dask to be configured to use processes and not threads, as the underlying regridding algorithm is not
         thread safe.
 
+        :param timefrmtstr: Time format string for output
         :param var: List of variables to convert, otherwise all are converted
         :param crs_out: Output CRS to reproject to, otherwise uses source CRS
         :return:
         """
 
-
-        def _dowork_toraster(d, crs_in, crs_out=None):
+        def _dowork_toraster(d, crs_in, timefrmtstr, crs_out=None):
             name = d.name
 
-            time = str(d.time.values[0]).split('.')[0]
+            # this almost always comes as a single length vector but, sometimes, a scalar. No idea
+            try:
+                t = d.time.values[0]
+            except IndexError as e:
+                t = d.time.values
+
+            time = pd.to_datetime(str(t))
+            time = time.strftime(timefrmtstr)
+
             d = d.rio.write_nodata(-9999)
+            dxdy = d.coords['dxdy'].values
             if crs_out is not None:
                 tmp = d.squeeze().drop('lat').drop('lon').drop('time')
                 tmp.rio.set_crs(crs_in)
@@ -50,7 +62,7 @@ class GeoAccessor:
             else:
                 tmp = d
 
-            tmp_tiff = f'{name}_{time}.tif'
+            tmp_tiff = f'{name}_{dxdy}x{dxdy}_{time}.tif'
             tmp.rio.to_raster(tmp_tiff)
 
             return d
@@ -64,7 +76,7 @@ class GeoAccessor:
 
         for v in var:
             df = self._obj[v]
-            mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'crs_out': crs_out }, template=df)
+            mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'timefrmtstr': timefrmtstr, 'crs_out': crs_out}, template=df)
             work.append(mapped)
             # mapped.compute()
 
@@ -272,6 +284,14 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
     ds.coords['lon'] = (('y', 'x'), lon)
     ds.coords['lat'] = (('y', 'x'), lat)
 
+    # Because the geo accessor can so easily lose information, set it like this so it is easily obtained
+    ds = ds.assign_coords({'dxdy': dxdy})
+
+    # sets internal rio crs
+    ds = ds.rio.set_crs(proj4)
+
+    # writes CRS in a CF compliant manner
+    ds = ds.rio.write_crs(proj4)
 
     return ds
 
@@ -377,7 +397,7 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
                            stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
 
-# This can't be done here as it can't be pickled
+    # This can't be done here as it can't be pickled
     # print(f'Building regridding ds' )
     # v = _load_vtu(vtu_paths[0])
     # mesh, grid = _build_regridding_ds(v.compute(), dxdy)
@@ -424,6 +444,9 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     lat = np.asarray(lat).reshape((ny, nx))
     ds.coords['lon'] = (('y', 'x'), lon)
     ds.coords['lat'] = (('y', 'x'), lat)
+
+    # Because the geo accessor can so easily lose information, set it like this so it is easily obtained
+    ds = ds.assign_coords({'dxdy': dxdy})
 
     # we need to be really careful when do this assignment as these attrs can be easily lost, see:
     # https://github.com/corteva/rioxarray/issues/427
