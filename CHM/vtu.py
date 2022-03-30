@@ -1,10 +1,12 @@
+
+import itertools
 import pyvista as pv
 import xarray as xr
 import os
 import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
-
+import time
 import dask
 import dask.array as da
 
@@ -29,7 +31,7 @@ class GeoAccessor:
         dxdy = self._obj.coords['dxdy'].values
         return dxdy
 
-    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S'):
+    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S', _dowork_toraster=None):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
         Will work on every timestep in parallel. Doing so requires dask to be configured to use processes and not threads, as the underlying regridding algorithm is not
@@ -41,7 +43,7 @@ class GeoAccessor:
         :return:
         """
 
-        def _dowork_toraster(d, crs_in, timefrmtstr, crs_out=None):
+        def _dowork_toraster(crs_in, timefrmtstr, crs_out, d):
             name = d.name
 
             # this almost always comes as a single length vector but, sometimes, a scalar. No idea
@@ -63,6 +65,7 @@ class GeoAccessor:
                 tmp = d
 
             tmp_tiff = f'{name}_{dxdy}x{dxdy}_{time}.tif'
+            print(f'{tmp_tiff}')
             tmp.rio.to_raster(tmp_tiff)
 
             return d
@@ -74,11 +77,12 @@ class GeoAccessor:
 
         work = []
 
-        for v in var:
-            df = self._obj[v]
-            mapped = xr.map_blocks(_dowork_toraster, df, kwargs={'crs_in': self._obj.rio.crs, 'timefrmtstr': timefrmtstr, 'crs_out': crs_out}, template=df)
-            work.append(mapped)
-            # mapped.compute()
+        for t in range(0, len(self._obj.time.values)):
+            for v in var:
+                df = self._obj.isel(time=t)[v]
+
+                task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
+                work.append(task)
 
         dask.compute(*work)
 
@@ -103,11 +107,27 @@ def _load_vtu(fname):
 
 
 @dask.delayed
-def _regrid_mesh_to_grid(vtu, dxdy, var, mesh, grid):
+def _regrid_mesh_to_grid(vtu, dxdy, var):
+                         # num_node, nodeId, nodeCoord, nodeOwner,
+                         # num_elem, elemId, elemType, elemConn, elemCoord,
+                         # numX, numY,
+                         # x_center, y_center,
+                         # x_corner, y_corner
+                         # ):
 
-    # print('_regrid_mesh_to_grid called')
+    print(f'_regrid_mesh_to_grid called for {var}')
+
+    start_time = time.time()
     mesh, grid = _build_regridding_ds(vtu, dxdy)
 
+    # mesh, grid = _regridding_ds_from_partial(num_node, nodeId, nodeCoord, nodeOwner,
+    #                             num_elem, elemId, elemType, elemConn, elemCoord,
+    #                             numX, numY,
+    #                             x_center, y_center,
+    #                             x_corner, y_corner)
+    print('Took ' + str(time.time() - start_time) + ' to build the regridding ds')
+
+    start_time = time.time()
     srcfield = ESMF.Field(mesh, name=var, meshloc=ESMF.MeshLoc.ELEMENT)
     srcfield.data[:] = vtu[var]
     dstfield = ESMF.Field(grid, var)
@@ -123,7 +143,126 @@ def _regrid_mesh_to_grid(vtu, dxdy, var, mesh, grid):
 
     df = da.from_array(out.data)
 
+    print('Took ' + str(time.time() - start_time) + ' to regrid')
+
     return df
+
+def _regridding_ds_from_partial(num_node, nodeId, nodeCoord, nodeOwner,
+                                num_elem, elemId, elemType, elemConn, elemCoord,
+                                numX, numY,
+                                x_center, y_center,
+                                x_corner, y_corner):
+    nodes, elements = (0, 1)
+    u, v = (0, 1)
+
+    Emesh = ESMF.Mesh(parametric_dim=2, spatial_dim=2)
+    Emesh.add_nodes(num_node, nodeId, nodeCoord, nodeOwner)
+    Emesh.add_elements(num_elem, elemId, elemType, elemConn, element_coords=elemCoord)
+
+    max_index = np.array([len(x_center), len(y_center)])
+
+    grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER],
+                     coord_sys=ESMF.CoordSys.CART)
+
+    # RLO: access Grid center coordinates
+    gridXCenter = grid.get_coords(0)
+    gridYCenter = grid.get_coords(1)
+
+    # RLO: set Grid center coordinates as a 2D array (this can also be done 1d)
+    gridXCenter[...] = x_center.reshape((x_center.size, 1))
+    gridYCenter[...] = y_center.reshape((1, y_center.size))
+
+    # RLO: access Grid corner coordinates
+    gridXCorner = grid.get_coords(0, staggerloc=ESMF.StaggerLoc.CORNER)
+    gridYCorner = grid.get_coords(1, staggerloc=ESMF.StaggerLoc.CORNER)
+
+    # RLO: set Grid corner coordinats as a 2D array
+    gridXCorner[...] = x_corner.reshape((x_corner.size, 1))
+    gridYCorner[...] = y_corner.reshape((1, y_corner.size))
+
+    return Emesh, grid
+
+def _build_partial_regridding_ds(mesh, dxdy):
+    print('_build_partial_regridding_ds called')
+
+    nodes, elements = (0, 1)
+    u, v = (0, 1)
+
+    Emesh = ESMF.Mesh(parametric_dim=2, spatial_dim=2)
+    num_node = mesh.n_points
+    num_elem = mesh.n_cells
+
+    nodeId = np.linspace(0, num_node, num_node)
+    nodeCoord = np.empty(num_node * 2)  # bc xy coords
+    nodeOwner = np.zeros(num_node)
+
+    for i in range(0, num_node * 2, 2):
+        # just x, y
+        nodeCoord[i] = mesh.GetPoint(i // 2)[0]
+        nodeCoord[i + 1] = mesh.GetPoint(i // 2)[1]
+
+    Emesh.add_nodes(num_node, nodeId, nodeCoord, nodeOwner)
+
+    elemId = np.empty(num_elem)
+    elemType = np.empty(num_elem)
+    elemConn = np.empty(num_elem * 3)
+    elemCoord = np.empty(num_elem * 2)
+
+    for i in range(0, num_elem * 3, 3):
+        elemId[i // 3] = i
+
+        elemType[i // 3] = ESMF.MeshElemType.TRI
+
+        v0 = mesh.GetCell(i // 3).GetPointId(0)
+        v1 = mesh.GetCell(i // 3).GetPointId(1)
+        v2 = mesh.GetCell(i // 3).GetPointId(2)
+
+        elemConn[i] = v0
+        elemConn[i + 1] = v2
+        elemConn[i + 2] = v1
+
+        centreX = 1 / 3 * (nodeCoord[v0] + nodeCoord[v1] + nodeCoord[v2])
+        centreY = 1 / 3 * (nodeCoord[v0 + 1] + nodeCoord[v1 + 1] + nodeCoord[v2 + 1])
+
+        elemCoord[i // 3] = centreX
+        elemCoord[(i // 3) + 1] = centreY
+
+    Emesh.add_elements(num_elem, elemId, elemType, elemConn, element_coords=elemCoord)
+
+    numX, numY = _get_shape(mesh, dxdy)
+
+    # cell centres
+    x_center = np.linspace(start=Emesh.coords[nodes][u].min() + dxdy / 2.,
+                           stop=Emesh.coords[nodes][u].max() - dxdy / 2., num=numX)
+    y_center = np.linspace(start=Emesh.coords[nodes][v].min() + dxdy / 2.,
+                           stop=Emesh.coords[nodes][v].max() - dxdy / 2., num=numY)
+
+    # node coords
+    x_corner = np.linspace(start=Emesh.coords[nodes][u].min(), stop=Emesh.coords[nodes][u].max(), num=numX + 1)
+    y_corner = np.linspace(start=Emesh.coords[nodes][v].min(), stop=Emesh.coords[nodes][v].max(), num=numY + 1)
+
+    # max_index = np.array([len(x_center), len(y_center)])
+
+    # grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER],
+    #                  coord_sys=ESMF.CoordSys.CART)
+    #
+    # # RLO: access Grid center coordinates
+    # gridXCenter = grid.get_coords(0)
+    # gridYCenter = grid.get_coords(1)
+    #
+    # # RLO: set Grid center coordinates as a 2D array (this can also be done 1d)
+    # gridXCenter[...] = x_center.reshape((x_center.size, 1))
+    # gridYCenter[...] = y_center.reshape((1, y_center.size))
+    #
+    # # RLO: access Grid corner coordinates
+    # gridXCorner = grid.get_coords(0, staggerloc=ESMF.StaggerLoc.CORNER)
+    # gridYCorner = grid.get_coords(1, staggerloc=ESMF.StaggerLoc.CORNER)
+    #
+    # # RLO: set Grid corner coordinats as a 2D array
+    # gridXCorner[...] = x_corner.reshape((x_corner.size, 1))
+    # gridYCorner[...] = y_corner.reshape((1, y_corner.size))
+
+    return num_node, nodeId, nodeCoord, nodeOwner, num_elem, elemId, elemType, elemConn, elemCoord, numX, numY, x_center, y_center, x_corner, y_corner
 
 # @dask.delayed
 def _build_regridding_ds(mesh, dxdy):
@@ -308,11 +447,11 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
     :return:
     """
 
-    try:
-        if dask.config.get('scheduler') != 'processes':
-            raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
-    except:
-        raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
+    # try:
+    #     if dask.config.get('scheduler') != 'processes':
+    #         raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
+    # except:
+    #     raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
 
     # see if we were given a single vtu file or a pvd xml file
     filename, file_extension = os.path.splitext(fname)
@@ -370,7 +509,6 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
     shape = _get_shape(blocks, dxdy)
 
-
     proj4 = blocks[0]["proj4"][0]
     print(f'proj4 = {proj4}')
     if variables is not None:
@@ -386,6 +524,11 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
                 a = v.replace('[param] ','_param_').replace('/','') # sanitize the name, this should be fixed in CHM though
                 variables.append(a)
 
+
+    print('Creating regridding topology')
+    # start_time = time.time()
+    # num_node, nodeId, nodeCoord, nodeOwner, num_elem, elemId, elemType, elemConn, elemCoord, numX, numY, x_center, y_center, x_corner, y_corner = _build_partial_regridding_ds(blocks.combine(), dxdy)
+    # print('Took ' + str(time.time() - start_time))
 
     delayed_vtu = {}
     for var in variables:
@@ -411,8 +554,14 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
         # vtu = _load_vtu(v)
 
         for var in variables:
+            print(f'Loading delayed {var}')
             vtu = _load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
-            df = _regrid_mesh_to_grid(vtu, dxdy, var, None, None)
+            df = _regrid_mesh_to_grid(vtu, dxdy, var)
+                                        # num_node, nodeId, nodeCoord, nodeOwner,
+                                        #  num_elem, elemId, elemType, elemConn, elemCoord,
+                                        #  numX, numY,
+                                        #  x_center, y_center,
+                                        #  x_corner, y_corner)
             d = da.from_delayed(df,
                                 shape=shape,
                                 dtype=np.dtype('float64'))
@@ -434,6 +583,7 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
         delayed_vtu[var].chunk({'time': 1, 'x':-1, 'y':-1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
+
 
     # Compute the lon/lat coordinates with rasterio.warp.transform
     ny, nx = len(ds['y']), len(ds['x'])
