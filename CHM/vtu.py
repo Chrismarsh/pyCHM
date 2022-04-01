@@ -68,7 +68,6 @@ class GeoAccessor:
             print(f'{tmp_tiff}')
             tmp.rio.to_raster(tmp_tiff)
 
-            return d
 
         if var is None:
             var = list(self._obj.keys())
