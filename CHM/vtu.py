@@ -553,7 +553,6 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
         # vtu = _load_vtu(v)
 
         for var in variables:
-            print(f'Loading delayed {var}')
             vtu = _load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
             df = _regrid_mesh_to_grid(vtu, dxdy, var)
                                         # num_node, nodeId, nodeCoord, nodeOwner,
