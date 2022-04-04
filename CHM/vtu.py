@@ -103,7 +103,7 @@ def _get_shape(mesh, dxdy):
     return int(x/dxdy),int(y/dxdy)
 
 
-@dask.delayed
+# @dask.delayed
 def _load_vtu(fname):
     # print('Loading and combining vtu...',end='')
     vtu = pv.MultiBlock([pv.read(f) for f in fname])
@@ -112,7 +112,7 @@ def _load_vtu(fname):
 
 
 @dask.delayed
-def _regrid_mesh_to_grid(vtu, dxdy, var):
+def _regrid_mesh_to_grid(v, dxdy, var):
                          # num_node, nodeId, nodeCoord, nodeOwner,
                          # num_elem, elemId, elemType, elemConn, elemCoord,
                          # numX, numY,
@@ -121,8 +121,8 @@ def _regrid_mesh_to_grid(vtu, dxdy, var):
                          # ):
 
     print(f'_regrid_mesh_to_grid called for {var}')
-
     start_time = time.time()
+    vtu = _load_vtu(v)
     mesh, grid = _build_regridding_ds(vtu, dxdy)
 
     # mesh, grid = _regridding_ds_from_partial(num_node, nodeId, nodeCoord, nodeOwner,
@@ -412,7 +412,7 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
 
     for var, arrays in delayed_vtu.items():
         delayed_vtu[var] = xr.concat(arrays, dim=times)
-        delayed_vtu[var].chunk({'time': 1})
+        delayed_vtu[var] = delayed_vtu[var].chunk({'time': 1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
     ds = ds.rio.set_crs(proj4)
@@ -559,7 +559,7 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
         # vtu = _load_vtu(v)
 
         for var in variables:
-            vtu = _load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
+            vtu = v #_load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
             df = _regrid_mesh_to_grid(vtu, dxdy, var)
                                         # num_node, nodeId, nodeCoord, nodeOwner,
                                         #  num_elem, elemId, elemType, elemConn, elemCoord,
@@ -580,11 +580,11 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
     _dt = int(dt.astype("timedelta64[s]")/np.timedelta64(1, 's'))
 
-    times = pd.date_range(start = epoch, end = end_time, freq= f'{_dt} s' , name="time")
+    times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
 
     for var, arrays in delayed_vtu.items():
         delayed_vtu[var] = xr.concat(arrays, dim=times)
-        delayed_vtu[var].chunk({'time': 1, 'x':-1, 'y':-1})
+        delayed_vtu[var] = delayed_vtu[var].chunk({'time': 1, 'x': -1, 'y': -1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
 
