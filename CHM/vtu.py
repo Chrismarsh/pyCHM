@@ -68,6 +68,8 @@ class GeoAccessor:
             print(f'{tmp_tiff}')
             tmp.rio.to_raster(tmp_tiff)
 
+            # return d
+
 
         if var is None:
             var = list(self._obj.keys())
@@ -75,10 +77,14 @@ class GeoAccessor:
             var = [var]
 
         work = []
+        # fn = xr.apply_ufunc(_dowork_toraster, self._obj, kwargs={'crs_in': self._obj.rio.crs, 'timefrmtstr': timefrmtstr, 'crs_out': crs_out},dask='allowed')
+        # print(fn)
+        # mapped = xr.map_blocks(_dowork_toraster, self._obj, kwargs={'crs_in': self._obj.rio.crs, 'timefrmtstr': timefrmtstr, 'crs_out': crs_out}, template=self._obj)
+        # mapped.compute()
 
         for t in range(0, len(self._obj.time.values)):
             for v in var:
-                df = self._obj.isel(time=t)[v]
+                df = self._obj.isel(time=t)[v].copy()
 
                 task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
                 work.append(task)
