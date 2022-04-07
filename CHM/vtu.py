@@ -112,24 +112,13 @@ def _load_vtu(fname):
 
 
 @dask.delayed
-def _regrid_mesh_to_grid(v, dxdy, var):
-                         # num_node, nodeId, nodeCoord, nodeOwner,
-                         # num_elem, elemId, elemType, elemConn, elemCoord,
-                         # numX, numY,
-                         # x_center, y_center,
-                         # x_corner, y_corner
-                         # ):
+def _regrid_mesh_to_grid(v, dxdy, var, regridding_method):
 
     print(f'_regrid_mesh_to_grid called for {var}')
     start_time = time.time()
     vtu = _load_vtu(v)
     mesh, grid = _build_regridding_ds(vtu, dxdy)
 
-    # mesh, grid = _regridding_ds_from_partial(num_node, nodeId, nodeCoord, nodeOwner,
-    #                             num_elem, elemId, elemType, elemConn, elemCoord,
-    #                             numX, numY,
-    #                             x_center, y_center,
-    #                             x_corner, y_corner)
     print('Took ' + str(time.time() - start_time) + ' to build the regridding ds')
 
     start_time = time.time()
@@ -143,7 +132,12 @@ def _regrid_mesh_to_grid(v, dxdy, var):
     # in the source field is 0.0, then it's possible that after regridding with the second-order method, the
     # destination field will contain values less than 0.0.
     # https://esmf-org.github.io/dev_docs/ESMF_refdoc/node3.html#SECTION03023000000000000000
-    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=ESMF.RegridMethod.CONSERVE, unmapped_action=ESMF.UnmappedAction.IGNORE)
+
+    method = ESMF.RegridMethod.BILINEAR
+    if regridding_method == 'CONSERVE':
+        method = ESMF.RegridMethod.CONSERVE
+
+    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=method, unmapped_action=ESMF.UnmappedAction.IGNORE)
     out = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
 
     df = da.from_array(out.data)
@@ -152,124 +146,7 @@ def _regrid_mesh_to_grid(v, dxdy, var):
 
     return df
 
-def _regridding_ds_from_partial(num_node, nodeId, nodeCoord, nodeOwner,
-                                num_elem, elemId, elemType, elemConn, elemCoord,
-                                numX, numY,
-                                x_center, y_center,
-                                x_corner, y_corner):
-    nodes, elements = (0, 1)
-    u, v = (0, 1)
 
-    Emesh = ESMF.Mesh(parametric_dim=2, spatial_dim=2)
-    Emesh.add_nodes(num_node, nodeId, nodeCoord, nodeOwner)
-    Emesh.add_elements(num_elem, elemId, elemType, elemConn, element_coords=elemCoord)
-
-    max_index = np.array([len(x_center), len(y_center)])
-
-    grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER],
-                     coord_sys=ESMF.CoordSys.CART)
-
-    # RLO: access Grid center coordinates
-    gridXCenter = grid.get_coords(0)
-    gridYCenter = grid.get_coords(1)
-
-    # RLO: set Grid center coordinates as a 2D array (this can also be done 1d)
-    gridXCenter[...] = x_center.reshape((x_center.size, 1))
-    gridYCenter[...] = y_center.reshape((1, y_center.size))
-
-    # RLO: access Grid corner coordinates
-    gridXCorner = grid.get_coords(0, staggerloc=ESMF.StaggerLoc.CORNER)
-    gridYCorner = grid.get_coords(1, staggerloc=ESMF.StaggerLoc.CORNER)
-
-    # RLO: set Grid corner coordinats as a 2D array
-    gridXCorner[...] = x_corner.reshape((x_corner.size, 1))
-    gridYCorner[...] = y_corner.reshape((1, y_corner.size))
-
-    return Emesh, grid
-
-def _build_partial_regridding_ds(mesh, dxdy):
-    print('_build_partial_regridding_ds called')
-
-    nodes, elements = (0, 1)
-    u, v = (0, 1)
-
-    Emesh = ESMF.Mesh(parametric_dim=2, spatial_dim=2)
-    num_node = mesh.n_points
-    num_elem = mesh.n_cells
-
-    nodeId = np.linspace(0, num_node, num_node)
-    nodeCoord = np.empty(num_node * 2)  # bc xy coords
-    nodeOwner = np.zeros(num_node)
-
-    for i in range(0, num_node * 2, 2):
-        # just x, y
-        nodeCoord[i] = mesh.GetPoint(i // 2)[0]
-        nodeCoord[i + 1] = mesh.GetPoint(i // 2)[1]
-
-    Emesh.add_nodes(num_node, nodeId, nodeCoord, nodeOwner)
-
-    elemId = np.empty(num_elem)
-    elemType = np.empty(num_elem)
-    elemConn = np.empty(num_elem * 3)
-    elemCoord = np.empty(num_elem * 2)
-
-    for i in range(0, num_elem * 3, 3):
-        elemId[i // 3] = i
-
-        elemType[i // 3] = ESMF.MeshElemType.TRI
-
-        v0 = mesh.GetCell(i // 3).GetPointId(0)
-        v1 = mesh.GetCell(i // 3).GetPointId(1)
-        v2 = mesh.GetCell(i // 3).GetPointId(2)
-
-        elemConn[i] = v0
-        elemConn[i + 1] = v2
-        elemConn[i + 2] = v1
-
-        centreX = 1 / 3 * (nodeCoord[v0] + nodeCoord[v1] + nodeCoord[v2])
-        centreY = 1 / 3 * (nodeCoord[v0 + 1] + nodeCoord[v1 + 1] + nodeCoord[v2 + 1])
-
-        elemCoord[i // 3] = centreX
-        elemCoord[(i // 3) + 1] = centreY
-
-    Emesh.add_elements(num_elem, elemId, elemType, elemConn, element_coords=elemCoord)
-
-    numX, numY = _get_shape(mesh, dxdy)
-
-    # cell centres
-    x_center = np.linspace(start=Emesh.coords[nodes][u].min() + dxdy / 2.,
-                           stop=Emesh.coords[nodes][u].max() - dxdy / 2., num=numX)
-    y_center = np.linspace(start=Emesh.coords[nodes][v].min() + dxdy / 2.,
-                           stop=Emesh.coords[nodes][v].max() - dxdy / 2., num=numY)
-
-    # node coords
-    x_corner = np.linspace(start=Emesh.coords[nodes][u].min(), stop=Emesh.coords[nodes][u].max(), num=numX + 1)
-    y_corner = np.linspace(start=Emesh.coords[nodes][v].min(), stop=Emesh.coords[nodes][v].max(), num=numY + 1)
-
-    # max_index = np.array([len(x_center), len(y_center)])
-
-    # grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER],
-    #                  coord_sys=ESMF.CoordSys.CART)
-    #
-    # # RLO: access Grid center coordinates
-    # gridXCenter = grid.get_coords(0)
-    # gridYCenter = grid.get_coords(1)
-    #
-    # # RLO: set Grid center coordinates as a 2D array (this can also be done 1d)
-    # gridXCenter[...] = x_center.reshape((x_center.size, 1))
-    # gridYCenter[...] = y_center.reshape((1, y_center.size))
-    #
-    # # RLO: access Grid corner coordinates
-    # gridXCorner = grid.get_coords(0, staggerloc=ESMF.StaggerLoc.CORNER)
-    # gridYCorner = grid.get_coords(1, staggerloc=ESMF.StaggerLoc.CORNER)
-    #
-    # # RLO: set Grid corner coordinats as a 2D array
-    # gridXCorner[...] = x_corner.reshape((x_corner.size, 1))
-    # gridYCorner[...] = y_corner.reshape((1, y_corner.size))
-
-    return num_node, nodeId, nodeCoord, nodeOwner, num_elem, elemId, elemType, elemConn, elemCoord, numX, numY, x_center, y_center, x_corner, y_corner
-
-# @dask.delayed
 def _build_regridding_ds(mesh, dxdy):
     # print('_build_regridding_ds called')
 
@@ -281,13 +158,20 @@ def _build_regridding_ds(mesh, dxdy):
     num_elem = mesh.n_cells
 
     nodeId = np.linspace(0, num_node, num_node)
-    nodeCoord = np.empty(num_node * 2)  # bc xy coords
+
+    # store as x,y pairs in sequence
+    # [ x0,y0,
+    #   x1,y1. [...] ]
+    nodeCoord = np.empty(num_node * 2)
     nodeOwner = np.zeros(num_node)
+
 
     for i in range(0, num_node * 2, 2):
         # just x, y
         nodeCoord[i] = mesh.GetPoint(i // 2)[0]
         nodeCoord[i + 1] = mesh.GetPoint(i // 2)[1]
+
+
 
     Emesh.add_nodes(num_node, nodeId, nodeCoord, nodeOwner)
 
@@ -297,7 +181,7 @@ def _build_regridding_ds(mesh, dxdy):
     elemCoord = np.empty(num_elem * 2)
 
     for i in range(0, num_elem * 3, 3):
-        elemId[i // 3] = i
+        elemId[i // 3] = i // 3
 
         elemType[i // 3] = ESMF.MeshElemType.TRI
 
@@ -305,15 +189,25 @@ def _build_regridding_ds(mesh, dxdy):
         v1 = mesh.GetCell(i // 3).GetPointId(1)
         v2 = mesh.GetCell(i // 3).GetPointId(2)
 
+        # nodes that make up the triangulation
         elemConn[i] = v0
         elemConn[i + 1] = v2
         elemConn[i + 2] = v1
 
-        centreX = 1 / 3 * (nodeCoord[v0] + nodeCoord[v1] + nodeCoord[v2])
-        centreY = 1 / 3 * (nodeCoord[v0 + 1] + nodeCoord[v1 + 1] + nodeCoord[v2 + 1])
+        # Centroid
+        # i = x + width*y;
+        centreX = 1 / 3 * (nodeCoord[2*v0 + 0] + nodeCoord[2*v1 + 0] + nodeCoord[2*v2 + 0])
+        centreY = 1 / 3 * (nodeCoord[2*v0 + 1] + nodeCoord[2*v1 + 1] + nodeCoord[2*v2 + 1])
 
-        elemCoord[i // 3] = centreX
-        elemCoord[(i // 3) + 1] = centreY
+        #i = x + width*y;
+        elemCoord[2*(i // 3) + 0] = centreX
+        elemCoord[2*(i // 3) + 1] = centreY
+
+        # if i // 3 < 3:
+        #     print(f'tri={i // 3}')
+        #     print(f'\t\t', nodeCoord[v0*2], nodeCoord[v1*2], nodeCoord[v2*2])
+        #     print(f'\t\t', nodeCoord[2*v0 +1], nodeCoord[2*v1+1], nodeCoord[2*v2+1])
+        #     print('')
 
     Emesh.add_elements(num_elem, elemId, elemType, elemConn, element_coords=elemCoord)
 
@@ -439,7 +333,7 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
 
     return ds
 
-def pvd_to_xarray(fname, dxdy=50, variables=None):
+def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
     """
     Opens a pvd file and returns a Dask delayed xarray object. As it is a delayed object,
     once a specific timestep's variable is operated upon, the delayed object is computed
@@ -448,7 +342,8 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
     :param fname: pvd file path
     :param dxdy: spatial resolution in metres to regrid to.
-    :para variables: List of variables to keep from the loaded vtu file
+    :param variables: List of variables to keep from the loaded vtu file
+    :param regridding_method 'BILINEAR' or 'CONSERVE'
     :return:
     """
 
@@ -560,12 +455,8 @@ def pvd_to_xarray(fname, dxdy=50, variables=None):
 
         for var in variables:
             vtu = v #_load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
-            df = _regrid_mesh_to_grid(vtu, dxdy, var)
-                                        # num_node, nodeId, nodeCoord, nodeOwner,
-                                        #  num_elem, elemId, elemType, elemConn, elemCoord,
-                                        #  numX, numY,
-                                        #  x_center, y_center,
-                                        #  x_corner, y_corner)
+            df = _regrid_mesh_to_grid(vtu, dxdy, var, regridding_method)
+
             d = da.from_delayed(df,
                                 shape=shape,
                                 dtype=np.dtype('float64'))
