@@ -45,7 +45,9 @@ class GeoAccessor:
         :return:
         """
 
-        def _dowork_toraster(crs_in, timefrmtstr, crs_out, d):
+        def _dowork_toraster(crs_in, timefrmtstr, crs_out, df):
+
+            d = df.persist()
             name = d.name
 
             # this almost always comes as a single length vector but, sometimes, a scalar. No idea
@@ -103,7 +105,7 @@ class GeoAccessor:
         else:
             print('Waiting...')
             while len(glob.glob('*.tif')) != total:
-                print(f"""Found {len(glob.glob('*.tmp'))} of {total}""")
+                print(f"""Found {len(glob.glob('*.tif'))} of {total}""")
                 time.sleep(5)
 
 
