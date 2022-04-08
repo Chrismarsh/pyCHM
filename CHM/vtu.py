@@ -7,9 +7,11 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import time
+
 import dask
 import dask.array as da
 
+import glob
 import re
 import ESMF
 import pathlib
@@ -31,7 +33,7 @@ class GeoAccessor:
         dxdy = self._obj.coords['dxdy'].values
         return dxdy
 
-    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S', _dowork_toraster=None):
+    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S', client=None):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
         Will work on every timestep in parallel. Doing so requires dask to be configured to use processes and not threads, as the underlying regridding algorithm is not
@@ -68,8 +70,6 @@ class GeoAccessor:
             print(f'{tmp_tiff}')
             tmp.rio.to_raster(tmp_tiff)
 
-            # return d
-
 
         if var is None:
             var = list(self._obj.keys())
@@ -82,14 +82,29 @@ class GeoAccessor:
         # mapped = xr.map_blocks(_dowork_toraster, self._obj, kwargs={'crs_in': self._obj.rio.crs, 'timefrmtstr': timefrmtstr, 'crs_out': crs_out}, template=self._obj)
         # mapped.compute()
 
+        if client is not None:
+            print('using fire and forget code path')
+
+        total = 0
         for t in range(0, len(self._obj.time.values)):
             for v in var:
                 df = self._obj.isel(time=t)[v].copy()
+                total = total + 1
 
-                task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
-                work.append(task)
+                if client is None:
+                    task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
+                    work.append(task)
+                else:
+                    c = client.submit(_dowork_toraster, self._obj.rio.crs, timefrmtstr, crs_out, df)
+                    dask.distributed.fire_and_forget(c)
 
-        dask.compute(*work)
+        if client is None:
+            dask.compute(*work)
+        else:
+            print('Waiting...')
+            while len(glob.glob('*.tif')) != total:
+                print(f"""Found {len(glob.glob('*.tmp'))} of {total}""")
+                time.sleep(5)
 
 
 def _get_shape(mesh, dxdy):
