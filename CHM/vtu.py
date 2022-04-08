@@ -62,15 +62,15 @@ class GeoAccessor:
             d = d.rio.write_nodata(-9999)
             dxdy = d.coords['dxdy'].values
             if crs_out is not None:
-                tmp = d.squeeze().drop('lat').drop('lon').drop('time')
-                tmp.rio.set_crs(crs_in)
-                tmp = tmp.rio.reproject(crs_out)
-            else:
-                tmp = d
+                d = d.squeeze().drop('lat').drop('lon').drop('time')
+                d.rio.set_crs(crs_in)
+                d = d.rio.reproject(crs_out)
 
             tmp_tiff = f'{name}_{dxdy}x{dxdy}_{time}.tif'
             print(f'{tmp_tiff}')
-            tmp.rio.to_raster(tmp_tiff)
+            d.rio.to_raster(tmp_tiff)
+
+            del d
 
 
         if var is None:
@@ -103,10 +103,23 @@ class GeoAccessor:
         if client is None:
             dask.compute(*work)
         else:
-            print('Waiting...')
-            while len(glob.glob('*.tif')) != total:
-                print(f"""Found {len(glob.glob('*.tif'))} of {total}""")
-                time.sleep(5)
+            done = False
+            while not done:
+                file_tif = glob.glob('*.tif')
+
+                finished = 0
+
+                for f in file_tif:
+                    if os.path.getsize(f) > 0:
+                        finished = finished + 1
+
+                if finished == total:
+                    done = True
+                else:
+                    time.sleep(30)
+
+                print(f"""Found {finished} of {total}""")
+
 
 
 def _get_shape(mesh, dxdy):
