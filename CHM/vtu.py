@@ -5,15 +5,21 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import time
-
+import itertools
 import dask
 import dask.bag as db
 import dask.array as da
-
+# from concurrent import futures
+# from tqdm import tqdm
+from functools import partial
 import re
 import ESMF
 import pathlib
-import gc
+# import gc
+
+from multiprocessing import Pool
+
+# from memory_profiler import profile
 
 # the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
 import rioxarray  # for xarray.rio
@@ -32,8 +38,39 @@ class GeoAccessor:
         dxdy = self._obj.coords['dxdy'].values
         return dxdy
 
+    def _dowork_toraster(self, crs_in, timefrmtstr, crs_out, d):
 
-    def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S', client=None):
+        name = d.name
+
+        # this almost always comes as a single length vector but, sometimes, a scalar. No idea
+        try:
+            t = d.time.values[0]
+        except IndexError as e:
+            t = d.time.values
+
+        time = pd.to_datetime(str(t))
+        time = time.strftime(timefrmtstr)
+
+        d = d.rio.write_nodata(-9999)
+        dxdy = d.coords['dxdy'].values
+        if crs_out is not None:
+            d = d.squeeze().drop('lat').drop('lon').drop('time')
+            d.rio.set_crs(crs_in)
+            d = d.rio.reproject(crs_out)
+
+        tmp_tiff = f'{name}_{dxdy}x{dxdy}_{time}.tif'
+        print(f'{tmp_tiff}')
+        d.rio.to_raster(tmp_tiff)
+
+        return [0]
+
+    def to_raster(self, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S'):
+        for t in range(0, len(self._obj.time.values)):
+            for v in list(self._obj.keys()):
+                df = self._obj.isel(time=t)[v]
+                self._dowork_toraster(self._obj.rio.crs, timefrmtstr, crs_out, df)
+
+    def to_raster_dask(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S', client=None):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
         Will work on every timestep in parallel. Doing so requires dask to be configured to use processes and not threads, as the underlying regridding algorithm is not
@@ -44,38 +81,6 @@ class GeoAccessor:
         :param crs_out: Output CRS to reproject to, otherwise uses source CRS
         :return:
         """
-
-        from multiprocessing import Process, Queue
-        def _dowork_toraster(crs_in, timefrmtstr, crs_out, df):
-
-            d = df.persist()
-            name = d.name
-
-            # this almost always comes as a single length vector but, sometimes, a scalar. No idea
-            try:
-                t = d.time.values[0]
-            except IndexError as e:
-                t = d.time.values
-
-            time = pd.to_datetime(str(t))
-            time = time.strftime(timefrmtstr)
-
-            d = d.rio.write_nodata(-9999)
-            dxdy = d.coords['dxdy'].values
-            if crs_out is not None:
-                d = d.squeeze().drop('lat').drop('lon').drop('time')
-                d.rio.set_crs(crs_in)
-                d = d.rio.reproject(crs_out)
-
-            tmp_tiff = f'{name}_{dxdy}x{dxdy}_{time}.tif'
-            print(f'{tmp_tiff}')
-            d.rio.to_raster(tmp_tiff)
-
-            del d
-            gc.collect()
-
-            return [0]
-
 
         if var is None:
             var = list(self._obj.keys())
@@ -98,7 +103,7 @@ class GeoAccessor:
                 total = total + 1
 
                 # if client is None:
-                task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
+                task = dask.delayed(self._dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
                 # task = (self._obj.rio.crs, timefrmtstr, crs_out, df)
                 work.append(task)
 
@@ -109,24 +114,67 @@ class GeoAccessor:
 
 def _get_shape(mesh, dxdy):
     # number of cells @ this dxdy
-    # numX = int((Emesh.coords[nodes][u].max() - Emesh.coords[nodes][u].min()) / dxdy)
-    # numY = int((Emesh.coords[nodes][v].max() - Emesh.coords[nodes][v].min()) / dxdy)
-
     x = np.abs(mesh.bounds[0] - mesh.bounds[1])
     y = np.abs(mesh.bounds[2] - mesh.bounds[3])
 
     return int(x/dxdy), int(y/dxdy)
 
 
-# @dask.delayed
 def _load_vtu(fname):
     # print('Loading and combining vtu...',end='')
     vtu = pv.MultiBlock([pv.read(f) for f in fname])
     vtu = vtu.combine()
     return vtu
 
+def _regrid_mesh_to_grid_future(dxdy, proj4, x_center, y_center, regridding_method, args):
 
-@dask.delayed
+    vtu_timestep, var  = args
+    vtu = vtu_timestep[0]
+    timesteps = vtu_timestep[1]
+
+    df = _regrid_mesh_to_grid(vtu, dxdy, var, regridding_method)
+
+    tmp = xr.DataArray(df, name=var,
+                       coords={'y': y_center,
+                               'x': x_center},
+                       dims=['y', 'x'])
+    data_vars={}
+
+    #just a 1 ts range
+    t = pd.date_range(start=timesteps, end=timesteps, name="time")
+
+    data_vars[var] = xr.concat([tmp], dim=t)
+
+    ds = xr.Dataset(data_vars=data_vars)
+
+    # Compute the lon/lat coordinates with rasterio.warp.transform
+    ny, nx = len(ds['y']), len(ds['x'])
+    x, y = np.meshgrid(ds['x'], ds['y'])
+    # Rasterio works with 1D arrays
+    lon, lat = transform(proj4, 'EPSG:4326', x.flatten(), y.flatten())
+    lon = np.asarray(lon).reshape((ny, nx))
+    lat = np.asarray(lat).reshape((ny, nx))
+    ds.coords['lon'] = (('y', 'x'), lon)
+    ds.coords['lat'] = (('y', 'x'), lat)
+
+    # Because the geo accessor can so easily lose information, set it like this so it is easily obtained
+    ds = ds.assign_coords({'dxdy': dxdy})
+
+    # we need to be really careful when do this assignment as these attrs can be easily lost, see:
+    # https://github.com/corteva/rioxarray/issues/427
+    # https://corteva.github.io/rioxarray/stable/getting_started/crs_management.html
+    # https://corteva.github.io/rioxarray/stable/getting_started/manage_information_loss.html
+
+    # sets internal rio crs
+    ds = ds.rio.set_crs(proj4)
+
+    # writes CRS in a CF compliant manner
+    ds = ds.rio.write_crs(proj4)
+
+    ds.chm.to_raster()
+
+
+
 def _regrid_mesh_to_grid(v, dxdy, var, regridding_method):
 
     print(f'_regrid_mesh_to_grid called for {var}')
@@ -160,16 +208,11 @@ def _regrid_mesh_to_grid(v, dxdy, var, regridding_method):
 
     print('Took ' + str(time.time() - start_time) + ' to regrid')
 
-    del regrid
-    del out
-    del vtu
-
-    gc.collect()
-
     return df
 
 
 def _build_regridding_ds(mesh, dxdy):
+
     # print('_build_regridding_ds called')
 
     nodes, elements = (0, 1)
@@ -224,12 +267,6 @@ def _build_regridding_ds(mesh, dxdy):
         #i = x + width*y;
         elemCoord[2*(i // 3) + 0] = centreX
         elemCoord[2*(i // 3) + 1] = centreY
-
-        # if i // 3 < 3:
-        #     print(f'tri={i // 3}')
-        #     print(f'\t\t', nodeCoord[v0*2], nodeCoord[v1*2], nodeCoord[v2*2])
-        #     print(f'\t\t', nodeCoord[2*v0 +1], nodeCoord[2*v1+1], nodeCoord[2*v2+1])
-        #     print('')
 
     Emesh.add_elements(num_elem, elemId, elemType, elemConn, element_coords=elemCoord)
 
@@ -355,6 +392,46 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
 
     return ds
 
+def pvd_to_tiff(fname, dxdy=50, variables=None, regridding_method='BILINEAR', nworkers=4):
+    timesteps, vtu_paths = read_pvd(fname)
+
+    print('Determining mesh extents...', end='')
+    blocks = pv.MultiBlock([pv.read(f) for f in vtu_paths[0]])
+    shape = _get_shape(blocks, dxdy)
+
+    proj4 = blocks[0]["proj4"][0]
+
+    print(f'proj4 = {proj4}')
+    if variables is not None:
+        # ensure we are not asking for an output that is a vector
+        for v in variables:
+            if len(blocks[0][v].shape) > 1:
+                raise Exception('Cannot specify a variable that is a vector output shape = (n,3) ')
+    else:
+        variables = []
+        excludelist = ['proj4', 'global_id']
+        for v in blocks[0].array_names:
+            if len(blocks[0][v].shape) == 1 and v not in excludelist: # don't add the vectors
+                a = v.replace('[param] ','_param_').replace('/','') # sanitize the name, this should be fixed in CHM though
+                variables.append(a)
+
+    # cell centres
+    x_center = np.linspace(start=blocks.bounds[0] + dxdy / 2.,
+                           stop=blocks.bounds[1] - dxdy / 2., num=shape[0])
+    y_center = np.linspace(start=blocks.bounds[2] + dxdy / 2.,
+                           stop=blocks.bounds[3] - dxdy / 2., num=shape[1])
+
+    vtu_var = [x for x in itertools.product(zip(vtu_paths, timesteps), variables)]
+
+    # serial testing
+    # for vv in vtu_var:
+    #    _regrid_mesh_to_grid_future(dxdy, proj4, x_center, y_center, regridding_method, vv)
+
+    pool = Pool(processes=nworkers, maxtasksperchild=1)
+    pool.map( partial(_regrid_mesh_to_grid_future, dxdy, proj4, x_center, y_center, regridding_method), vtu_var)
+
+    return
+
 def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
     """
     Opens a pvd file and returns a Dask delayed xarray object. As it is a delayed object,
@@ -375,56 +452,7 @@ def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
     # except:
     #     raise("""Dask needs to use processes instead of threads because of the esmf backend.\nSet:\n\tdask.config.set(scheduler='processes')""")
 
-    # see if we were given a single vtu file or a pvd xml file
-    filename, file_extension = os.path.splitext(fname)
-
-    timesteps = None
-    dt = np.timedelta64(1,'s')
-
-    if file_extension != '.pvd':
-        raise Exception('Not a pvd file')
-
-    parse = ET.parse(fname)
-    pvd = parse.findall(".//*[@file]")
-
-    timesteps = parse.findall(".//*[@timestep]")
-
-    epoch = np.datetime64(int(timesteps[0].get('timestep')), 's')
-
-    # before we can come up with a possible dt, we need to see if we have multiple rank MPI outputs which will have 1 file
-    # per MPI rank with a [basename]<timestamp>_<MPIRANK>.vtu format
-
-    ranks = []
-
-    # print(pvd)
-    # loop through to detect how many mpi ranks were used
-    for f in pvd:
-
-        m = re.findall('.+_([0-9]+).vtu', f.get('file'))
-        m = int(m[0])
-        if m not in ranks:
-            ranks.append(m)
-        else:
-            break
-
-    print(f'MPI ranks = {len(ranks)} detected in pvd')
-    nranks = len(ranks)
-
-    if len(timesteps) > 1 and len(timesteps) > nranks:
-        dt = np.datetime64(int(timesteps[nranks].get('timestep')),'s') - np.datetime64(int(timesteps[0].get('timestep')),'s')
-        print('dt='+str(dt))
-    vtu_paths = []
-
-    base_dir = pathlib.Path(fname).parent.absolute()
-    for i in range(0, len(pvd), nranks):
-        current_vtu_paths = []  # holds 1 timestep's vtu paths
-        for r in range(nranks):
-            vtu = pvd[i + r]
-            vtu_file = vtu.get('file')
-            path = os.path.join(base_dir, vtu_file)
-            current_vtu_paths.append(path)
-
-        vtu_paths.append(current_vtu_paths)
+    timesteps, vtu_paths = read_pvd(fname)
 
     print('Determining mesh extents...',end='')
     blocks = pv.MultiBlock([pv.read(f) for f in vtu_paths[0]])
@@ -440,17 +468,13 @@ def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
                 raise Exception('Cannot specify a variable that is a vector output shape = (n,3) ')
     else:
         variables = []
-        blacklist = ['proj4', 'global_id']
+        excludelist = ['proj4', 'global_id']
         for v in blocks[0].array_names:
-            if len(blocks[0][v].shape) == 1 and v not in blacklist: # don't add the vectors
+            if len(blocks[0][v].shape) == 1 and v not in excludelist: # don't add the vectors
                 a = v.replace('[param] ','_param_').replace('/','') # sanitize the name, this should be fixed in CHM though
                 variables.append(a)
 
-
     print('Creating regridding topology')
-    # start_time = time.time()
-    # num_node, nodeId, nodeCoord, nodeOwner, num_elem, elemId, elemType, elemConn, elemCoord, numX, numY, x_center, y_center, x_corner, y_corner = _build_partial_regridding_ds(blocks.combine(), dxdy)
-    # print('Took ' + str(time.time() - start_time))
 
     delayed_vtu = {}
     for var in variables:
@@ -467,17 +491,14 @@ def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
     # v = _load_vtu(vtu_paths[0])
     # mesh, grid = _build_regridding_ds(v.compute(), dxdy)
 
-
     blocks = None
-    for v in vtu_paths:
-
-        # print(v)
+    for vtu in vtu_paths:
         # This prevents pickling
         # vtu = _load_vtu(v)
 
         for var in variables:
-            vtu = v #_load_vtu(v)  # can done here to pickle, but then will end up being a bit more costly
-            df = _regrid_mesh_to_grid(vtu, dxdy, var, regridding_method)
+
+            df = dask.delayed(_regrid_mesh_to_grid)(vtu, dxdy, var, regridding_method)
 
             d = da.from_delayed(df,
                                 shape=(shape[1], shape[0]), # allows us to skip the d.T below as rasterio et al want y,x coords
@@ -489,14 +510,10 @@ def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
                                dims=['y', 'x'])
             delayed_vtu[var].append(tmp)
 
-    end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
 
-    _dt = int(dt.astype("timedelta64[s]")/np.timedelta64(1, 's'))
-
-    times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
 
     for var, arrays in delayed_vtu.items():
-        delayed_vtu[var] = xr.concat(arrays, dim=times)
+        delayed_vtu[var] = xr.concat(arrays, dim=timesteps)
         delayed_vtu[var] = delayed_vtu[var].chunk({'time': 1, 'x': -1, 'y': -1})
 
     ds = xr.Dataset(data_vars=delayed_vtu)
@@ -528,6 +545,52 @@ def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
 
 
     return ds
+
+
+def read_pvd(fname):
+    # see if we were given a single vtu file or a pvd xml file
+    filename, file_extension = os.path.splitext(fname)
+    timesteps = None
+    dt = np.timedelta64(1, 's')
+    if file_extension != '.pvd':
+        raise Exception('Not a pvd file')
+    parse = ET.parse(fname)
+    pvd = parse.findall(".//*[@file]")
+    timesteps = parse.findall(".//*[@timestep]")
+    epoch = np.datetime64(int(timesteps[0].get('timestep')), 's')
+    # before we can come up with a possible dt, we need to see if we have multiple rank MPI outputs which will have 1 file
+    # per MPI rank with a [basename]<timestamp>_<MPIRANK>.vtu format
+    ranks = []
+    # print(pvd)
+    # loop through to detect how many mpi ranks were used
+    for f in pvd:
+
+        m = re.findall('.+_([0-9]+).vtu', f.get('file'))
+        m = int(m[0])
+        if m not in ranks:
+            ranks.append(m)
+        else:
+            break
+    print(f'MPI ranks = {len(ranks)} detected in pvd')
+    nranks = len(ranks)
+    if len(timesteps) > 1 and len(timesteps) > nranks:
+        dt = np.datetime64(int(timesteps[nranks].get('timestep')), 's') - np.datetime64(int(timesteps[0].get('timestep')), 's')
+        print('dt=' + str(dt))
+    vtu_paths = []
+    base_dir = pathlib.Path(fname).parent.absolute()
+    for i in range(0, len(pvd), nranks):
+        current_vtu_paths = []  # holds 1 timestep's vtu paths
+        for r in range(nranks):
+            vtu = pvd[i + r]
+            vtu_file = vtu.get('file')
+            path = os.path.join(base_dir, vtu_file)
+            current_vtu_paths.append(path)
+
+        vtu_paths.append(current_vtu_paths)
+    end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
+    _dt = int(dt.astype("timedelta64[s]") / np.timedelta64(1, 's'))
+    times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
+    return times, vtu_paths
 
 
 
