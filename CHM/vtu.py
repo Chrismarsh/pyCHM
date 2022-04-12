@@ -5,7 +5,6 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import time
-from memory_profiler import profile
 
 import dask
 import dask.bag as db
@@ -74,6 +73,8 @@ class GeoAccessor:
 
             del d
             gc.collect()
+
+            return [0]
 
 
         if var is None:
