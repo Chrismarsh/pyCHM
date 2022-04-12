@@ -1,5 +1,3 @@
-
-import itertools
 import pyvista as pv
 import xarray as xr
 import os
@@ -7,14 +5,16 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pandas as pd
 import time
+from memory_profiler import profile
 
 import dask
+import dask.bag as db
 import dask.array as da
 
-import glob
 import re
 import ESMF
 import pathlib
+import gc
 
 # the order of the next two seems to matter for weird proj_data behaviour on some hpc machines
 import rioxarray  # for xarray.rio
@@ -33,6 +33,7 @@ class GeoAccessor:
         dxdy = self._obj.coords['dxdy'].values
         return dxdy
 
+
     def to_raster(self, var=None, crs_out=None, timefrmtstr='%Y-%m-%dT%H%M%S', client=None):
         """
         Accessible from the xarray object, e.g., ``df.chm.to_raster(...)``. This allows for converting the entire data array into georeferenced tiffs.
@@ -45,6 +46,7 @@ class GeoAccessor:
         :return:
         """
 
+        from multiprocessing import Process, Queue
         def _dowork_toraster(crs_in, timefrmtstr, crs_out, df):
 
             d = df.persist()
@@ -71,6 +73,7 @@ class GeoAccessor:
             d.rio.to_raster(tmp_tiff)
 
             del d
+            gc.collect()
 
 
         if var is None:
@@ -90,35 +93,16 @@ class GeoAccessor:
         total = 0
         for t in range(0, len(self._obj.time.values)):
             for v in var:
-                df = self._obj.isel(time=t)[v].copy()
+                df = self._obj.isel(time=t)[v]# .copy()
                 total = total + 1
 
-                if client is None:
-                    task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
-                    work.append(task)
-                else:
-                    c = client.submit(_dowork_toraster, self._obj.rio.crs, timefrmtstr, crs_out, df)
-                    dask.distributed.fire_and_forget(c)
+                # if client is None:
+                task = dask.delayed(_dowork_toraster)(self._obj.rio.crs, timefrmtstr, crs_out, df)
+                # task = (self._obj.rio.crs, timefrmtstr, crs_out, df)
+                work.append(task)
 
-        if client is None:
-            dask.compute(*work)
-        else:
-            done = False
-            while not done:
-                file_tif = glob.glob('*.tif')
-
-                finished = 0
-
-                for f in file_tif:
-                    if os.path.getsize(f) > 0:
-                        finished = finished + 1
-
-                if finished == total:
-                    done = True
-                else:
-                    time.sleep(30)
-
-                print(f"""Found {finished} of {total}""")
+        b = db.from_delayed(work)
+        b.compute()
 
 
 
@@ -130,7 +114,7 @@ def _get_shape(mesh, dxdy):
     x = np.abs(mesh.bounds[0] - mesh.bounds[1])
     y = np.abs(mesh.bounds[2] - mesh.bounds[3])
 
-    return int(x/dxdy),int(y/dxdy)
+    return int(x/dxdy), int(y/dxdy)
 
 
 # @dask.delayed
@@ -171,8 +155,15 @@ def _regrid_mesh_to_grid(v, dxdy, var, regridding_method):
     out = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
 
     df = da.from_array(out.data)
+    df = df.T
 
     print('Took ' + str(time.time() - start_time) + ' to regrid')
+
+    del regrid
+    del out
+    del vtu
+
+    gc.collect()
 
     return df
 
@@ -319,7 +310,7 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
                             shape=shape,
                             dtype=np.dtype('float64'))
 
-        tmp = xr.DataArray(d.T, name=var,
+        tmp = xr.DataArray(d, name=var,
                            coords={'y': y_center,
                                    'x': x_center},
                            dims=['y', 'x'])
@@ -488,10 +479,10 @@ def pvd_to_xarray(fname, dxdy=50, variables=None, regridding_method='BILINEAR'):
             df = _regrid_mesh_to_grid(vtu, dxdy, var, regridding_method)
 
             d = da.from_delayed(df,
-                                shape=shape,
+                                shape=(shape[1], shape[0]), # allows us to skip the d.T below as rasterio et al want y,x coords
                                 dtype=np.dtype('float64'))
 
-            tmp = xr.DataArray(d.T, name=var,
+            tmp = xr.DataArray(d, name=var,
                                coords={'y': y_center,
                                        'x': x_center},
                                dims=['y', 'x'])
