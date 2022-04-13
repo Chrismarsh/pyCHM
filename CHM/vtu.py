@@ -126,13 +126,14 @@ def _load_vtu(fname):
     vtu = vtu.combine()
     return vtu
 
-def _regrid_mesh_to_grid_future(dxdy, proj4, x_center, y_center, regridding_method, args):
+
+def _regrid_mesh_to_grid_future(dxdy, proj4, x_center, y_center, regridding_method, write_weights, weight_file, args):
 
     vtu_timestep, var  = args
     vtu = vtu_timestep[0]
     timesteps = vtu_timestep[1]
 
-    df = _regrid_mesh_to_grid(vtu, dxdy, var, regridding_method)
+    df = _regrid_mesh_to_grid(vtu, dxdy, var, regridding_method, write_weights, weight_file)
 
     tmp = xr.DataArray(df, name=var,
                        coords={'y': y_center,
@@ -175,7 +176,7 @@ def _regrid_mesh_to_grid_future(dxdy, proj4, x_center, y_center, regridding_meth
 
 
 
-def _regrid_mesh_to_grid(v, dxdy, var, regridding_method):
+def _regrid_mesh_to_grid(v, dxdy, var, regridding_method, write_weights=False, weight_file=None):
 
     print(f'_regrid_mesh_to_grid called for {var}')
     start_time = time.time()
@@ -200,7 +201,17 @@ def _regrid_mesh_to_grid(v, dxdy, var, regridding_method):
     if regridding_method == 'CONSERVE':
         method = ESMF.RegridMethod.CONSERVE
 
-    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=method, unmapped_action=ESMF.UnmappedAction.IGNORE)
+    wfile = None
+    if write_weights:
+        wfile = 'weights.nc'
+
+    regrid = None
+    if weight_file is None:
+        regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=method,
+                             unmapped_action=ESMF.UnmappedAction.IGNORE, filename=wfile)
+    else:
+        regrid = ESMF.RegridFromFile(srcfield, dstfield, weight_file)
+
     out = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
 
     df = da.from_array(out.data)
@@ -392,7 +403,7 @@ def vtu_to_xarray(fname, dxdy=30, variables=None):
 
     return ds
 
-def pvd_to_tiff(fname, dxdy=50, variables=None, regridding_method='BILINEAR', nworkers=4):
+def pvd_to_tiff(fname, dxdy=50, variables=None, regridding_method='BILINEAR', nworkers=4, save_weights=False):
     timesteps, vtu_paths = read_pvd(fname)
 
     print('Determining mesh extents...', end='')
@@ -428,7 +439,14 @@ def pvd_to_tiff(fname, dxdy=50, variables=None, regridding_method='BILINEAR', nw
     #    _regrid_mesh_to_grid_future(dxdy, proj4, x_center, y_center, regridding_method, vv)
 
     pool = Pool(processes=nworkers, maxtasksperchild=1)
-    pool.map( partial(_regrid_mesh_to_grid_future, dxdy, proj4, x_center, y_center, regridding_method), vtu_var)
+
+    if save_weights:
+        #writting weights
+        pool.map(partial(_regrid_mesh_to_grid_future, dxdy, proj4, x_center, y_center, regridding_method, True, None), [vtu_var[0]])
+
+        pool.map( partial(_regrid_mesh_to_grid_future, dxdy, proj4, x_center, y_center, regridding_method, False, 'weights.nc'), vtu_var[1:])
+    else:
+        pool.map(partial(_regrid_mesh_to_grid_future, dxdy, proj4, x_center, y_center, regridding_method, False, None), vtu_var)
 
     return
 
