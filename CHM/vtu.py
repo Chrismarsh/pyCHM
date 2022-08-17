@@ -217,6 +217,14 @@ def _regrid_mesh_to_grid(v, dxdy, var, regridding_method, write_weights=False, w
     df = da.from_array(out.data)
     df = df.T
 
+    print('destroy call')
+
+    srcfield.destroy()
+    dstfield.destroy()
+    mesh.destroy()
+    regrid.destroy()
+    out.destroy()
+
     print('Took ' + str(time.time() - start_time) + ' to regrid')
 
     return df
