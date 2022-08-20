@@ -155,7 +155,8 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005):
                                dims=['y', 'x'])
             tiff = tiff.rio.write_nodata(-9999.0)
             tiff = tiff.rio.set_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
-            tiff.rio.to_raster(f'{ESMF.local_pet()}-{var}-{time}-output.tiff')
+            var_san = var.replace('[', '_').replace(']', '_')
+            tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
             comm.barrier()
@@ -165,7 +166,10 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005):
 
     product = None
     if ESMF.local_pet() == 0:
-        product = [x for x in itertools.product(variables, processed_times)]
+
+        var_san = [var.replace('[', '_').replace(']', '_') for var in variables]
+
+        product = [x for x in itertools.product(var_san, processed_times)]
         product = np.array_split(product, ESMF.pet_count())
 
     product = comm.scatter(product, root=0)

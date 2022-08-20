@@ -25,7 +25,6 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None):
         for v in blocks[0].array_names:
             if len(blocks[0][v].shape) == 1 and v not in excludelist: # don't add the vectors
                 a = v.replace('[param] ', '_param_').replace('/', '') # sanitize the name, this should be fixed in CHM though
-                a = a.replace('[', '_').replace(']', '_')
                 variables.append(a)
 
     mesh = blocks.combine()
@@ -147,6 +146,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None):
         mesh = blocks.combine()
 
         for var in variables:
+
             ds.variables[var][i, :] = mesh[var]
 
         i = i + 1
