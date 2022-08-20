@@ -4,7 +4,7 @@
 /docs/_ext/__pycache__
 /.ipynb_checkpoints
 *.pyc
-/dask-worker-space
+*/dask-worker-space
 /build
 /dist
 /pyCHM/__pycache__/*
