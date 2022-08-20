@@ -11,7 +11,7 @@ def get_installed_gdal_version():
         version = version.replace('\n', '')
         # pygdal doesn't always have the most up todate version so we will need to swtich to pygdal-chm if it is not available
         chm = ''
-        if packaging.version.parse(version) > packaging.version.parse("3.4.1"):
+        if packaging.version.parse(version) > packaging.version.parse("3.5.1"):
             chm = '-chm'
 
         version = chm + "==" + version + ".*"
@@ -25,14 +25,15 @@ def get_installed_gdal_version():
 
 setup(
     name='CHM',
-    version='1.1.7',
+    version='1.2.0',
     description='python tools for CHM',
     license='MIT',
     packages=find_packages(),
     author='Chris Marsh',
     author_email='chris.marsh@usask.ca',
-    install_requires=['vtk','numpy','xarray>=0.18.1','netCDF4','pandas',
+    install_requires=['vtk', 'numpy', 'xarray>=0.18.1', 'netCDF4', 'pandas',
                       'pygdal'+get_installed_gdal_version(), 'dask[complete]',
-                      'pyvista>0.29', 'pyESMF>=8.3.0','rioxarray','rasterio', 'ninja'],
+                      'pyvista>0.29', 'rioxarray', 'rasterio', 'ninja', 'netCDF4', 'cftime', 'pyproj'],
+    extra_requires={'complete': ['pyESMF>=8.3.0']},
     scripts=glob.glob("scripts/*.py"),
 )
