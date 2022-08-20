@@ -5,7 +5,6 @@ from cftime import date2num
 
 def vtu_to_ugrid(pvd, outnc, append=False, variables=None):
 
-
     writemode = 'a' if append else 'w'
     ds = nc.Dataset(outnc, writemode, format='NETCDF4')
 

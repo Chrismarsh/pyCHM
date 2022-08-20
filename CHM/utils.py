@@ -5,6 +5,7 @@ import re
 import pathlib
 import os
 from osgeo import gdal, ogr, osr
+import pyvista as pv
 
 @pd.api.extensions.register_dataframe_accessor("chm")
 
