@@ -9,7 +9,7 @@ import osgeo_utils.gdal_merge
 import glob
 import itertools
 
-def ugrid2tiff(ugrid_nc, dxdy=0.005):
+def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None):
     mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
 
@@ -21,7 +21,10 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005):
     # pc.vtu_to_ugrid(df, 'test2.nc')
     # quit()
 
-    mesh = ESMF.Mesh(filename=ugrid_nc,
+    # we might be loading a seperate mesh topology
+    mnc = ugrid_nc if mesh_topology_nc is None else mesh_topology_nc
+
+    mesh = ESMF.Mesh(filename=mnc,
                             filetype=ESMF.api.constants.FileFormat.UGRID,
                             meshname='Mesh2'
                      )
