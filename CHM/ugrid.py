@@ -136,12 +136,6 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
     # write just the topology
     ds = write_mesh('mesh.nc', mesh)
 
-    nc_var = ds.createVariable('global_id', 'f4', ('nMesh2_face'))
-    nc_var.mesh = "Mesh2"
-    nc_var.location = "face"
-    nc_var.coordinates = "Mesh2_face_x Mesh2_face_y"
-    nc_var[:] = mesh['global_id']
-
     ds.close()
 
     if only_topology:
