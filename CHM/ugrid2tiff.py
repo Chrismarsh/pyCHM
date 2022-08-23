@@ -9,7 +9,8 @@ import osgeo_utils.gdal_merge
 import glob
 import itertools
 
-def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None):
+
+def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative'):
     mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
 
@@ -34,7 +35,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None):
 
     nodes, elements = (0, 1)
     u, v = (0, 1)
-    # dxdy = 0.0005 # degrees about 50m
+    # dxdy = 0.0005 # degrees
 
     # communicate accross all the ranks to figure out the bounds of our mesh
     xmin_m = np.array([mesh.coords[nodes][u].min()])
@@ -120,17 +121,17 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None):
     # the sort is important as otherwise this can have a different order on different mpi ranks
     variables = sorted(list(set(variables)-set(exclude_list)))
 
-
     srcfield = ESMF.Field(mesh, meshloc=ESMF.MeshLoc.ELEMENT)
     dstfield = ESMF.Field(grid, staggerloc=ESMF.StaggerLoc.CENTER)
 
-
-    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=ESMF.RegridMethod.CONSERVE,
+    regrid_method = ESMF.RegridMethod.CONSERVE if method == 'conservative' else ESMF.RegridMethod.BILINEAR
+    print(f'Using {regrid_method} regridder')
+    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method,
                          unmapped_action=ESMF.UnmappedAction.IGNORE)
 
     # get the global_id offsets this rank is using
     srcfield_offsets = ESMF.Field(mesh, meshloc=ESMF.MeshLoc.ELEMENT)
-    srcfield_offsets.read(filename=ugrid_nc,
+    srcfield_offsets.read(filename=mnc,
                           variable='global_id', timeslice=0)
     offsets = np.array(srcfield_offsets.data[:], dtype=np.int64) #these need to be ints to index with
     srcfield_offsets.destroy()

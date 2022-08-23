@@ -18,13 +18,15 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
                 raise Exception('Cannot specify a variable that is a vector output shape = (n,3) ')
     else:
         variables = []
-        excludelist = ['proj4']#, 'global_id']
+        excludelist = ['proj4', 'global_id']
         for v in blocks[0].array_names:
             if len(blocks[0][v].shape) == 1 and v not in excludelist: # don't add the vectors
                 a = v.replace('[param] ', '_param_').replace('/', '') # sanitize the name, this should be fixed in CHM though
                 variables.append(a)
 
-    mesh = blocks.combine()
+    print('Merging blocks...')
+    mesh = blocks.combine(merge_points=True)
+    print('Done')
 
     def write_mesh(outnc, mesh):
         writemode = 'a' if append else 'w'
@@ -79,6 +81,11 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
         Mesh2_node_y.setncattr('long_name', "Latitude of 2D mesh nodes.")
         Mesh2_node_y.setncattr('units', "degrees_north")
 
+        nc_var = ds.createVariable('global_id', 'f4', ('nMesh2_face'))
+        nc_var.mesh = "Mesh2"
+        nc_var.location = "face"
+        nc_var.coordinates = "Mesh2_face_x Mesh2_face_y"
+        nc_var[:] = mesh['global_id']
 
         # face coordinadates
 
@@ -128,6 +135,13 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
     print('Writing mesh topology')
     # write just the topology
     ds = write_mesh('mesh.nc', mesh)
+
+    nc_var = ds.createVariable('global_id', 'f4', ('nMesh2_face'))
+    nc_var.mesh = "Mesh2"
+    nc_var.location = "face"
+    nc_var.coordinates = "Mesh2_face_x Mesh2_face_y"
+    nc_var[:] = mesh['global_id']
+
     ds.close()
 
     if only_topology:
