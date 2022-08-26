@@ -129,11 +129,17 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method,
                          unmapped_action=ESMF.UnmappedAction.IGNORE)
 
+    # srcfield.read(filename=ugrid_nc, variable='global_id', timeslice=0)
+    # offsets = np.array(srcfield.data[:], dtype=np.int64)
+    # offset_mask = df.global_id.isin(offsets)
+
+
     # get the global_id offsets this rank is using
     srcfield_offsets = ESMF.Field(mesh, meshloc=ESMF.MeshLoc.ELEMENT)
     srcfield_offsets.read(filename=mnc,
                           variable='global_id', timeslice=0)
     offsets = np.array(srcfield_offsets.data[:], dtype=np.int64) #these need to be ints to index with
+    offset_mask = df.global_id.isin(offsets)
     srcfield_offsets.destroy()
     srcfield_offsets = None
 
@@ -147,7 +153,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         for var in variables:
             print(f'{time} - {var}')
 
-            srcfield.data[:] = df.isel(time=ts)[var][offsets].data
+            srcfield.data[:] = df.isel(time=ts)[var].where(offset_mask, drop=True).data
             dstfield.data[...] = np.nan
 
             dstfield = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
@@ -167,6 +173,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
         processed_times.append(time)
 
+    df.close()
 
     product = None
     if ESMF.local_pet() == 0:

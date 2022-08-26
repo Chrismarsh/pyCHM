@@ -35,6 +35,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
         nMesh2_node = ds.createDimension('nMesh2_node', mesh.n_points)
         nMesh2_face = ds.createDimension('nMesh2_face', mesh.n_cells)
 
+
         # nMesh2_edge = ds.createDimension('nMesh2_edge', 5)
 
         timedim = ds.createDimension('time', None)
@@ -60,7 +61,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
         # Mesh2.setncattr('face_face_connectivity', "Mesh2_face_links") # optional
         # Mesh2.setncattr('edge_face_connectivity', "Mesh2_edge_face_links") # optional
 
-        Mesh2_face_nodes = ds.createVariable('Mesh2_face_nodes', 'i4', ("nMesh2_face", "Three"))
+        Mesh2_face_nodes = ds.createVariable('Mesh2_face_nodes', 'u8', ("nMesh2_face", "Three"))
         Mesh2_face_nodes.setncattr('cf_role', 'face_node_connectivity')
         Mesh2_face_nodes.setncattr('long_name', "Maps every triangular face to its three corner nodes.")
 
@@ -70,18 +71,18 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
         # Mesh2_edge_nodes.setncattr('long_name', "Maps every edge to the two nodes that it connects.")
 
 
-        Mesh2_node_x = ds.createVariable('Mesh2_node_x', 'f4', "nMesh2_node")
+        Mesh2_node_x = ds.createVariable('Mesh2_node_x', 'f8', "nMesh2_node")
         Mesh2_node_x.setncattr('standard_name', "longitude")
         Mesh2_node_x.setncattr('long_name', "Longitude of 2D mesh nodes.")
         Mesh2_node_x.setncattr('units', "degrees_east")
 
 
-        Mesh2_node_y = ds.createVariable('Mesh2_node_y', 'f4', "nMesh2_node")
+        Mesh2_node_y = ds.createVariable('Mesh2_node_y', 'f8', "nMesh2_node")
         Mesh2_node_y.setncattr('standard_name', "latitude")
         Mesh2_node_y.setncattr('long_name', "Latitude of 2D mesh nodes.")
         Mesh2_node_y.setncattr('units', "degrees_north")
 
-        nc_var = ds.createVariable('global_id', 'f4', ('nMesh2_face'))
+        nc_var = ds.createVariable('global_id', 'u8', ('nMesh2_face'))
         nc_var.mesh = "Mesh2"
         nc_var.location = "face"
         nc_var.coordinates = "Mesh2_face_x Mesh2_face_y"
@@ -89,12 +90,12 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
 
         # face coordinadates
 
-        Mesh2_face_x = ds.createVariable('Mesh2_face_x', 'f4', "nMesh2_face")
+        Mesh2_face_x = ds.createVariable('Mesh2_face_x', 'f8', "nMesh2_face")
         Mesh2_face_x.setncattr('standard_name', "longitude")
         Mesh2_face_x.setncattr('long_name', "Characteristics longitude of 2D mesh triangle (e.g. circumcenter coordinate).")
         Mesh2_face_x.setncattr('units', "degrees_east")
 
-        Mesh2_face_y = ds.createVariable('Mesh2_face_y', 'f4', "nMesh2_face")
+        Mesh2_face_y = ds.createVariable('Mesh2_face_y', 'f8', "nMesh2_face")
         Mesh2_face_y.setncattr('standard_name', "latitude")
         Mesh2_face_y.setncattr('long_name', "Characteristics latitude of 2D mesh triangle (e.g. circumcenter coordinate).")
         Mesh2_face_y.setncattr('units', "degrees_north")
@@ -144,9 +145,9 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
     print('Writting mesh + variables')
     ds = write_mesh(outnc, mesh)
 
-    time = ds.createVariable('time', 'f4', ('time',))
+    time = ds.createVariable('time', 'f8', ('time',))
     time.long_name = 'time'
-    time.units = f"seconds since {str(pvd.datetime[0])}"
+    time.units = f"minutes since {str(pvd.datetime[0])}"
     time.calendar = "standard"
 
 
@@ -155,7 +156,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
 
     # Create all the varibles
     for var in variables:
-        nc_var = ds.createVariable(var, 'f4', ('time', 'nMesh2_face'))
+        nc_var = ds.createVariable(var, 'f8', ('time', 'nMesh2_face'))
         nc_var.mesh = "Mesh2"
         nc_var.location = "face"
         nc_var.coordinates = "Mesh2_face_x Mesh2_face_y"
