@@ -61,7 +61,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
         # Mesh2.setncattr('face_face_connectivity', "Mesh2_face_links") # optional
         # Mesh2.setncattr('edge_face_connectivity', "Mesh2_edge_face_links") # optional
 
-        Mesh2_face_nodes = ds.createVariable('Mesh2_face_nodes', 'u8', ("nMesh2_face", "Three"))
+        Mesh2_face_nodes = ds.createVariable('Mesh2_face_nodes', 'i4', ("nMesh2_face", "Three"))
         Mesh2_face_nodes.setncattr('cf_role', 'face_node_connectivity')
         Mesh2_face_nodes.setncattr('long_name', "Maps every triangular face to its three corner nodes.")
 
@@ -82,7 +82,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
         Mesh2_node_y.setncattr('long_name', "Latitude of 2D mesh nodes.")
         Mesh2_node_y.setncattr('units', "degrees_north")
 
-        nc_var = ds.createVariable('global_id', 'u8', ('nMesh2_face'))
+        nc_var = ds.createVariable('global_id', 'i4', ('nMesh2_face'))
         nc_var.mesh = "Mesh2"
         nc_var.location = "face"
         nc_var.coordinates = "Mesh2_face_x Mesh2_face_y"
