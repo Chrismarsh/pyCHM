@@ -10,9 +10,13 @@ import glob
 import itertools
 
 
-def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative'):
+def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative', save_weights_file=None,
+               load_weights_file=None):
     mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
+
+    if save_weights_file is not None and load_weights_file is not None:
+        raise Exception("Cannot have both save_weights_file and load_weights_file set")
 
     # This creates the UGRID file
 
@@ -125,9 +129,25 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     dstfield = ESMF.Field(grid, staggerloc=ESMF.StaggerLoc.CENTER)
 
     regrid_method = ESMF.RegridMethod.CONSERVE if method == 'conservative' else ESMF.RegridMethod.BILINEAR
-    print(f'Using {regrid_method} regridder')
-    regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method,
+    print(f"""Using {'ESMF.RegridMethod.CONSERVE' if method == 'conservative' else 'ESMF.RegridMethod.BILINEAR'} regridder""")
+
+    # clean up old weight file and
+    if save_weights_file is not None and comm.Get_rank() == 0:
+        if os.path.isfile(
+                os.path.join(os.getcwd(), save_weights_file)):
+            os.remove(os.path.join(os.getcwd(), save_weights_file))
+
+    comm.barrier()
+    regrid = None
+    if save_weights_file is not None:
+        regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method, filename=save_weights_file,
                          unmapped_action=ESMF.UnmappedAction.IGNORE)
+    elif load_weights_file is not None:
+        print(f'Loading weights from {load_weights_file}')
+        regrid = ESMF.RegridFromFile(srcfield, dstfield, filename=load_weights_file)
+    else:
+        regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method, unmapped_action=ESMF.UnmappedAction.IGNORE)
+
 
     # srcfield.read(filename=ugrid_nc, variable='global_id', timeslice=0)
     # offsets = np.array(srcfield.data[:], dtype=np.int64)
