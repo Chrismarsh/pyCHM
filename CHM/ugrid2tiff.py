@@ -11,20 +11,29 @@ import itertools
 
 
 def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative', save_weights_file=None,
-               load_weights_file=None):
+               load_weights_file=None, variables = None):
+    """
+    Convert a ugrid file to tiff. The ugrid file needs to come from the pvd to ugrid conversion
+
+    df = pc.open_pvd('output_FSM_rhod600/SC.pvd')
+    df=df.set_index('datetime')['2017-11-01':'2018-04-03'].reset_index()
+    df = df.iloc[[0,30,60,90,120]] # every 30days in this period
+    pc.vtu_to_ugrid(df, 'test2.nc')
+
+    :param ugrid_nc:
+    :param dxdy:
+    :param mesh_topology_nc:
+    :param method:
+    :param save_weights_file:
+    :param load_weights_file:
+    :param variables:
+    :return:
+    """
     mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
 
     if save_weights_file is not None and load_weights_file is not None:
         raise Exception("Cannot have both save_weights_file and load_weights_file set")
-
-    # This creates the UGRID file
-
-    # df = pc.open_pvd('/Users/cmarsh/Documents/science/model_runs/benchmark_problems/kan_pbsm_TC2020/BSCor3_Alb100_NoSubTopo_NoPomLi_K0p3_NoCplz0_Recirc20_WN1000_24/output_FSM_rhod600/SC.pvd')
-    # df=df.set_index('datetime')['2017-11-01':'2018-04-03'].reset_index()
-    # df = df.iloc[[0,30,60,90,120]]
-    # pc.vtu_to_ugrid(df, 'test2.nc')
-    # quit()
 
     # we might be loading a seperate mesh topology
     mnc = ugrid_nc if mesh_topology_nc is None else mesh_topology_nc
@@ -34,12 +43,8 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
                             meshname='Mesh2'
                      )
 
-
-    # mesh._write_(f'{ESMF.local_pet()}-domain')
-
     nodes, elements = (0, 1)
     u, v = (0, 1)
-    # dxdy = 0.0005 # degrees
 
     # communicate accross all the ranks to figure out the bounds of our mesh
     xmin_m = np.array([mesh.coords[nodes][u].min()])
@@ -117,7 +122,9 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     # grid._write_(f'{ESMF.local_pet()}-grid')
 
     df = xr.open_mfdataset(ugrid_nc)
-    variables = list(df.keys())
+
+    if variables is None:
+        variables = list(df.keys())
 
     # don't convert these to tiff
     exclude_list = ['Mesh2', 'Mesh2_face_nodes', 'Mesh2_node_x', 'Mesh2_node_y', 'Mesh2_face_x', 'Mesh2_face_y', 'time', 'global_id' ]
@@ -189,12 +196,17 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
             tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
+            # don't want to corrupt the srcfield/dstfields by partially writting into them
             comm.barrier()
 
         processed_times.append(time)
 
+    print('Done regridding to partial tiffs')
+    comm.barrier()
     df.close()
+    comm.barrier()
 
+    print('Merging tiffs')
     product = None
     if ESMF.local_pet() == 0:
 
