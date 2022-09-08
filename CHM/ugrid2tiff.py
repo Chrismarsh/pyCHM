@@ -193,7 +193,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
             tiff = tiff.rio.write_nodata(-9999.0)
             tiff = tiff.rio.set_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
             var_san = var.replace('[', '_').replace(']', '_')
-            tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-output.tiff')
+            tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
             # don't want to corrupt the srcfield/dstfields by partially writting into them
@@ -220,7 +220,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
     for prod in product:
         var, time = prod
-        files = glob.glob(f'*-{var}-{time}-output.tiff')
+        files = glob.glob(f'*-{var}-{time}-{dxdy}x{dxdy}-output.tiff')
         if len(files) != ESMF.pet_count():
             raise Exception(f"Missing files for {var} {time}")
 
