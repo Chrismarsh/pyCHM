@@ -2,6 +2,7 @@ import netCDF4 as nc
 import pyvista as pv
 from pyproj import Transformer, transform, CRS
 from cftime import date2num
+import os
 
 def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
 
@@ -133,13 +134,15 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
 
         return ds
 
-    print('Writing mesh topology')
-    # write just the topology
-    ds = write_mesh('mesh.nc', mesh)
-
-    ds.close()
-
     if only_topology:
+        print('Writing mesh topology')
+        # write just the topology
+
+        meshfname = os.path.join(os.path.dirname(outnc),'mesh.'+os.path.basename(outnc))
+
+        ds = write_mesh(meshfname, mesh)
+        ds.close()
+
         return
 
     print('Writting mesh + variables')
