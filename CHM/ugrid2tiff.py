@@ -224,7 +224,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         if len(files) != ESMF.pet_count():
             raise Exception(f"Missing files for {var} {time}")
 
-        parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff"] + files + ['-co', 'COMPRESS=LZW']
+        parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
         osgeo_utils.gdal_merge.main(parameters)
 
         for f in files:
