@@ -4,7 +4,7 @@ from pyproj import Transformer, transform, CRS
 from cftime import date2num
 import os
 
-def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
+def vtu_to_ugrid(pvd, outnc, variables=None, only_topology=False, append=False, ):
 
     #load the first timestep to get the topology information from
     blocks = pv.MultiBlock([pv.read(f) for f in pvd.iloc[0].vtu_paths])
@@ -29,7 +29,7 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
     mesh = blocks.combine(merge_points=True)
     print('Done')
 
-    def write_mesh(outnc, mesh):
+    def write_mesh(outnc, mesh, append=False):
         writemode = 'a' if append else 'w'
         ds = nc.Dataset(outnc, writemode, format='NETCDF4')
 
@@ -140,13 +140,13 @@ def vtu_to_ugrid(pvd, outnc, append=False, variables=None, only_topology=False):
 
         meshfname = os.path.join(os.path.dirname(outnc),'mesh.'+os.path.basename(outnc))
 
-        ds = write_mesh(meshfname, mesh)
+        ds = write_mesh(meshfname, mesh, append=False)
         ds.close()
 
         return
 
     print('Writting mesh + variables')
-    ds = write_mesh(outnc, mesh)
+    ds = write_mesh(outnc, mesh, append)
 
     time = ds.createVariable('time', 'f8', ('time',))
     time.long_name = 'time'
