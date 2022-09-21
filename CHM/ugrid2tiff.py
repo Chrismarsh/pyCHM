@@ -11,7 +11,7 @@ import itertools
 
 
 def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative', save_weights_file=None,
-               load_weights_file=None, variables = None):
+               load_weights_file=None, variables=None):
     """
     Convert a ugrid file to tiff. The ugrid file needs to come from the pvd to ugrid conversion
 
@@ -93,7 +93,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     print( f'PET{ESMF.local_pet()} max_index={max_index}')
 
 
-    grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER])
+    grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER], coord_sys=ESMF.CoordSys.SPH_DEG)
 
     # RLO: access Grid center coordinates
     gridXCenter = grid.get_coords(0)

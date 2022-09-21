@@ -25,7 +25,7 @@ def get_installed_gdal_version():
 
 setup(
     name='CHM',
-    version='1.3.1',
+    version='1.3.2',
     description='python tools for CHM',
     license='MIT',
     packages=find_packages(),
@@ -33,7 +33,7 @@ setup(
     author_email='chris.marsh@usask.ca',
     install_requires=['vtk', 'numpy', 'xarray>=0.18.1', 'netCDF4', 'pandas',
                       'pygdal'+get_installed_gdal_version(), 'dask[complete]',
-                      'pyvista>0.29', 'rioxarray', 'rasterio', 'ninja', 'netCDF4', 'cftime', 'pyproj'],
+                      'pyvista>0.29', 'rioxarray', 'rasterio', 'ninja', 'cftime', 'pyproj'],
     extra_requires={'complete': ['pyESMF>=8.3.0']},
     scripts=glob.glob("scripts/*.py"),
 )
