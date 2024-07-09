@@ -1,6 +1,7 @@
 import sys
 import numpy as np
-import ESMF
+import esmpy as ESMF
+import rasterio
 import xarray as xr
 import rioxarray  # for xarray.rio
 import os
@@ -9,9 +10,11 @@ import osgeo_utils.gdal_merge
 import glob
 import itertools
 
+from osgeo import gdal
+
 
 def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative', save_weights_file=None,
-               load_weights_file=None, variables=None):
+               load_weights_file=None, variables=None, time_offsets=None):
     """
     Convert a ugrid file to tiff. The ugrid file needs to come from the pvd to ugrid conversion
 
@@ -29,7 +32,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     :param variables:
     :return:
     """
-    mg = ESMF.Manager(debug=True)
+    # mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
 
     if save_weights_file is not None and load_weights_file is not None:
@@ -173,7 +176,10 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     #hold a list of the processed times so we don't have to recompute it when dealing with tiff merging
     processed_times = []
 
-    for ts in range(0, df.time.shape[0]):
+    if time_offsets is None:
+        time_offsets = range(0, df.time.shape[0])
+
+    for ts in time_offsets:
 
         time = str(df.time[ts].dt.strftime('%Y%m%dT%H%M%S').data)
 
@@ -185,7 +191,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
             dstfield = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
 
-            tiff = xr.DataArray(dstfield.data.T, name=var,
+            tiff = xr.DataArray(np.flip(dstfield.data.T,axis=0), name=var,
                                coords={'y': y_center_par.data,
                                        'x': x_center_par.data
                                        },
@@ -193,6 +199,16 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
             tiff = tiff.rio.write_nodata(-9999.0)
             tiff = tiff.rio.set_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
             var_san = var.replace('[', '_').replace(']', '_')
+
+            # r = tiff.rio.resolution(recalc=True)
+            # b = tiff.rio.bounds(recalc=True)
+            # # print(r)
+            # print(b)
+            # geotransform = (b[0], r[0], 0.0,
+            #                 b[3], 0.0, -r[1] )
+            # a = Affine.from_gdal(*geotransform)
+            # print(a)
+            # tiff = tiffrio.write_transform(transform=a).
             tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
@@ -226,6 +242,24 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
         parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
         osgeo_utils.gdal_merge.main(parameters)
+
+
+        ds = gdal.Open(f"{var}-{dxdy}x{dxdy}_{time}.tiff", gdal.GA_Update)
+        gt = list(ds.GetGeoTransform())
+
+        # Y_geo = GT(3) + X_pixel * GT(4) + Y_line * GT(5)
+        ulx, xres, xskew, lly, yskew, yres = ds.GetGeoTransform()
+        uly = lly + (ds.RasterYSize * yres)
+
+        print(gt)
+        print(f'lly={lly} ds.RasterYSize={ds.RasterYSize} yres={yres} ==> uly {uly}')
+        gt[3] = uly
+        gt[5] = -gt[5]
+        ds.SetGeoTransform(gt)
+        ds.FlushCache()
+        ds = None
+        print(gt)
+
 
         for f in files:
             os.remove(f)

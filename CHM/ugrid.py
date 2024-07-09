@@ -168,7 +168,7 @@ def vtu_to_ugrid(pvd, outnc, variables=None, only_topology=False, append=False, 
     for idx, row in pvd.iterrows():
         blocks = pv.MultiBlock([pv.read(f) for f in row.vtu_paths])
         mesh = blocks.combine()
-
+        print(row)
         for var in variables:
 
             ds.variables[var][i, :] = mesh[var]
