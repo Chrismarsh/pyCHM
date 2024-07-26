@@ -1,2 +1,27 @@
 [build-system]
-requires = ["setuptools", "wheel", "ninja", "packaging"]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyCHM"
+version = "1.3.0"
+authors = [
+    {name="Chris Marsh"}
+]
+description = "python tools for CHM"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = ['vtk', 'numpy', 'xarray', 'netCDF4', 'pandas',
+                'gdal', 'dask[complete]',
+                'pyvista>0.29', 'rioxarray', 'rasterio', 'ninja', 'cftime', 'pyproj']
+license = ""
+
+[project.urls]
+Homepage = "https://github.com/Chrismarsh/mesher"
+
+[project.scripts]
+pvdFromDir = "pyCHM.scripts.pvd_from_dir:main"
+validateJSON = "pyCHM.scripts.validate_json:main"
+windmapper2mesher = "pyCHM.scripts.windmapper2mesher:main"
+vtu2geo = "pyCHM.scripts.vtu2geo:main"
+

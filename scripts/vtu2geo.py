@@ -72,7 +72,8 @@ def stdchannel_redirected(stdchannel, dest_filename):
 # the filename of the raster
 # pixel size, in srsout units. Constant dx,dy
 # attribute The value from the USM we want to burn into the raster
-def rasterize(layer, srsout, target_fname, pixel_size, attribute, user_define_extent=False, o_xmin=None, o_ymin=None, o_xmax=None, o_ymax=None, all_touched=True):
+def rasterize(layer, srsout, target_fname, pixel_size, attribute, user_define_extent=False,
+              o_xmin=None, o_ymin=None, o_xmax=None, o_ymax=None, all_touched=True):
     x_min, x_max, y_min, y_max = layer.GetExtent()
 
     NoData_value = -9999
@@ -110,6 +111,8 @@ def rasterize(layer, srsout, target_fname, pixel_size, attribute, user_define_ex
               target_fname,
               target_fname[:-4] + '_clipped.tif')], shell=True)
 
+
+# Regrids a vtu to a tiff or netcdf using gdal rasterize. Quite slow
 def main():
     gdal.UseExceptions()  # Enable errors
 
@@ -124,7 +127,6 @@ def main():
 
     # Load in configuration file as module
     X = imp.load_source('',configfile)
-
 
     # if a 2nd command line argument is present, it is the input_path so use that, otherwise try to use the one from passed script
     input_path = ''
