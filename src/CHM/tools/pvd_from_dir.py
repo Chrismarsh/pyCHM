@@ -3,7 +3,6 @@
 import glob
 import re
 
-
 def main():
     header = """<?xml version="1.0" encoding="utf-8"?>
     <VTKFile type="Collection" version="0.1">
@@ -28,14 +27,14 @@ def main():
 
         item = item % (ts, rank, f)
 
-        dataset.append( (ts,rank, item) )
+        dataset.append((ts, rank, item))
 
     dataset.sort(key=lambda tup: (tup[0], tup[1]) )
 
-    with open('out.pvd','w') as file:
+    with open('out.pvd', 'w') as file:
         file.write(header)
         for i in dataset:
-            file.write( i[2] )
+            file.write(i[2])
         file.write(footer)
 
 

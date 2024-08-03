@@ -12,6 +12,8 @@ import itertools
 
 from osgeo import gdal
 
+def log(message):
+    print(f'[{ESMF.local_pet()}] {message}')
 
 def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative', save_weights_file=None,
                load_weights_file=None, variables=None, time_offsets=None):
@@ -55,10 +57,10 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     ymin_m = np.array([mesh.coords[nodes][v].min()])
     ymax_m = np.array([mesh.coords[nodes][v].max()])
 
-    xmin = np.empty(1,dtype=np.float64)
-    xmax = np.empty(1,dtype=np.float64)
-    ymin = np.empty(1,dtype=np.float64)
-    ymax = np.empty(1,dtype=np.float64)
+    xmin = np.empty(1, dtype=np.float64)
+    xmax = np.empty(1, dtype=np.float64)
+    ymin = np.empty(1, dtype=np.float64)
+    ymax = np.empty(1, dtype=np.float64)
 
     comm.Allreduce(xmin_m, xmin, op=MPI.MIN)
     comm.Allreduce(ymin_m, ymin, op=MPI.MIN)
@@ -75,9 +77,9 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
     numX, numY = int(x/dxdy), int(y/dxdy)
 
-    print(f'numX, numY = {numX}, {numY}')
+    log(f'numX, numY = {numX}, {numY}')
 
-    print(f'PET{ESMF.local_pet()} - umin={mesh.coords[nodes][u].min()} umax={mesh.coords[nodes][u].max()} vmin={mesh.coords[nodes][v].min()} vmax={mesh.coords[nodes][v].max()} ')
+    log(f'umin={mesh.coords[nodes][u].min()} umax={mesh.coords[nodes][u].max()} vmin={mesh.coords[nodes][v].min()} vmax={mesh.coords[nodes][v].max()} ')
 
     # cell centres
     dxdy2 = dxdy/2.
@@ -93,7 +95,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
 
     max_index = np.array([len(x_center), len(y_center)])
-    print( f'PET{ESMF.local_pet()} max_index={max_index}')
+    log( f' max_index={max_index}')
 
 
     grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER], coord_sys=ESMF.CoordSys.SPH_DEG)
@@ -139,7 +141,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     dstfield = ESMF.Field(grid, staggerloc=ESMF.StaggerLoc.CENTER)
 
     regrid_method = ESMF.RegridMethod.CONSERVE if method == 'conservative' else ESMF.RegridMethod.BILINEAR
-    print(f"""Using {'ESMF.RegridMethod.CONSERVE' if method == 'conservative' else 'ESMF.RegridMethod.BILINEAR'} regridder""")
+    log(f"""Using {'ESMF.RegridMethod.CONSERVE' if method == 'conservative' else 'ESMF.RegridMethod.BILINEAR'} regridder""")
 
     # clean up old weight file and
     if save_weights_file is not None and comm.Get_rank() == 0:
@@ -153,7 +155,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method, filename=save_weights_file,
                          unmapped_action=ESMF.UnmappedAction.IGNORE)
     elif load_weights_file is not None:
-        print(f'Loading weights from {load_weights_file}')
+        log(f'Loading weights from {load_weights_file}')
         regrid = ESMF.RegridFromFile(srcfield, dstfield, filename=load_weights_file)
     else:
         regrid = ESMF.Regrid(srcfield, dstfield, regrid_method=regrid_method, unmapped_action=ESMF.UnmappedAction.IGNORE)
@@ -169,7 +171,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
     srcfield_offsets.read(filename=mnc,
                           variable='global_id', timeslice=0)
     offsets = np.array(srcfield_offsets.data[:], dtype=np.int64) #these need to be ints to index with
-    offset_mask = df.global_id.isin(offsets)
+    offset_mask = df.global_id.isin(offsets).compute()
     srcfield_offsets.destroy()
     srcfield_offsets = None
 
@@ -184,14 +186,14 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         time = str(df.time[ts].dt.strftime('%Y%m%dT%H%M%S').data)
 
         for var in variables:
-            print(f'{time} - {var}')
+            log(f'{time} - {var}')
 
             srcfield.data[:] = df.isel(time=ts)[var].where(offset_mask, drop=True).data
             dstfield.data[...] = np.nan
 
             dstfield = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
 
-            tiff = xr.DataArray(np.flip(dstfield.data.T,axis=0), name=var,
+            tiff = xr.DataArray(np.flip(dstfield.data.T, axis=0), name=var,
                                coords={'y': y_center_par.data,
                                        'x': x_center_par.data
                                        },
@@ -209,6 +211,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
             # a = Affine.from_gdal(*geotransform)
             # print(a)
             # tiff = tiffrio.write_transform(transform=a).
+
             tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
@@ -217,12 +220,12 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
 
         processed_times.append(time)
 
-    print('Done regridding to partial tiffs')
+    log('Done regridding to partial tiffs')
     comm.barrier()
     df.close()
     comm.barrier()
 
-    print('Merging tiffs')
+    log('Merging tiffs')
     product = None
     if ESMF.local_pet() == 0:
 
@@ -232,7 +235,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         product = np.array_split(product, ESMF.pet_count())
 
     product = comm.scatter(product, root=0)
-    print(f'PET{ESMF.local_pet()} has {product}')
+    log(f'PET{ESMF.local_pet()} has {product}')
 
     for prod in product:
         var, time = prod
@@ -243,11 +246,12 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
         osgeo_utils.gdal_merge.main(parameters)
 
-
         ds = gdal.Open(f"{var}-{dxdy}x{dxdy}_{time}.tiff", gdal.GA_Update)
         gt = list(ds.GetGeoTransform())
 
-        # Y_geo = GT(3) + X_pixel * GT(4) + Y_line * GT(5)
+        ## Y_geo = GT(3) + X_pixel * GT(4) + Y_line * GT(5)
+
+
         ulx, xres, xskew, lly, yskew, yres = ds.GetGeoTransform()
         uly = lly + (ds.RasterYSize * yres)
 
@@ -260,7 +264,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
         ds = None
         print(gt)
 
-
         for f in files:
             os.remove(f)
 
+    log('Done')

@@ -14,14 +14,14 @@ requires-python = ">=3.7"
 dependencies = ['vtk', 'numpy', 'xarray', 'netCDF4', 'pandas',
                 'gdal', 'dask[complete]',
                 'pyvista>0.29', 'rioxarray', 'rasterio', 'ninja', 'cftime', 'pyproj']
-license = ""
+
 
 [project.urls]
 Homepage = "https://github.com/Chrismarsh/mesher"
 
 [project.scripts]
-pvdFromDir = "pyCHM.scripts.pvd_from_dir:main"
-validateJSON = "pyCHM.scripts.validate_json:main"
-windmapper2mesher = "pyCHM.scripts.windmapper2mesher:main"
-vtu2geo = "pyCHM.scripts.vtu2geo:main"
+pvdFromDir = "CHM.tools.pvd_from_dir:main"
+validateJSON = "CHM.tools.validate_json:main"
+windmapper2mesher = "CHM.tools.windmapper2mesher:main"
+vtu2geo = "CHM.tools.vtu2geo:main"
 
