@@ -1,5 +1,3 @@
-# import sys
-
 import CHM as pc
 
 # df = pc.open_pvd('meshes/FSM.pvd')
