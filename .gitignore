@@ -9,3 +9,5 @@
 /dist
 /pyCHM/__pycache__/*
 /debugging/*
+/venv*
+*.egg-info*
