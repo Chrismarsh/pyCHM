@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<VTKFile type="Collection" version="0.1">
-    <Collection>
-        <DataSet timestep="1577458800" group="" part="0" file="FSM1577458800_0.vtu"/>
-        <DataSet timestep="1577462400" group="" part="0" file="FSM1577462400_0.vtu"/>
-        <DataSet timestep="1577466000" group="" part="0" file="FSM1577466000_0.vtu"/>
-    </Collection>
-</VTKFile>
