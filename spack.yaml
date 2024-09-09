@@ -1,12 +1,11 @@
 spack:
   specs:
-    - "py-pip"
     - "vtk@9.2: +python"
     - "py-numpy"
     - 'py-xarray +io +viz +parallel'
     - "py-netcdf4"
     - "py-pandas"
-    - "gdal@3.5: +python"
+    - "gdal@3.5: +python  +hdf5 +netcdf"
     - "py-dask"
     - "py-pyvista@0.29:"
     - "py-rioxarray"
@@ -27,5 +26,4 @@ spack:
     - "py-sortedcontainers"
     - "py-tblib"
     - "py-zict"
-    - "openblas@0.3.27:"
   view: ./view-pychm

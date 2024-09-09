@@ -10,4 +10,5 @@
 /pyCHM/__pycache__/*
 /debugging/*
 /venv*
+/examples
 *.egg-info*
