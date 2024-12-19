@@ -13,7 +13,7 @@ def gen_config(searchpath):
     files = glob.glob(f'{searchpath}{os.path.sep}*.tif')
 
     if len(files) == 0:
-        print('No tif files found')
+        print(f'No tif files found in {searchpath}')
         exit(1)
 
     # Find the vrt files
