@@ -8,9 +8,9 @@ import sys
 
 
 # Converts a directory ``searchpath`` from a set of windmapper inputs to the input mesher info
-def main(searchpath):
+def gen_config(searchpath):
 
-    files = glob.glob(f'{searchpath}/*.tif')
+    files = glob.glob(f'{searchpath}{os.path.sep}*.tif')
 
     if len(files) == 0:
         print('No tif files found')
@@ -85,12 +85,15 @@ def main(searchpath):
                 print(line)
 
 
-if __name__ == "__main__":
-
+def main():
     if len(sys.argv) == 1:
         print('Requires input path')
         exit(1)
 
     searchpath = sys.argv[1]
 
-    main(searchpath)
+    gen_config(searchpath)
+
+if __name__ == "__main__":
+    main()
+
