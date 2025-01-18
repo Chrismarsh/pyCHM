@@ -62,9 +62,21 @@ def open_pvd(fname):
             current_vtu_paths.append(path)
 
         vtu_paths.append(current_vtu_paths)
+
+    # don't assume that the files are output at a constant dt
+    ts = []
+    for t in timesteps:
+        ts.append(np.datetime64(int(t.get('timestep')), 's'))
+
+    times = pd.to_datetime(ts)
+
+
     end_time = np.datetime64(int(timesteps[-1].get('timestep')), 's')
     _dt = int(dt.astype("timedelta64[s]") / np.timedelta64(1, 's'))
-    times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
+    const_dt_times = pd.date_range(start=epoch, end=end_time, freq=f'{_dt} s', name="time")
+
+    if len(const_dt_times) != len(times):
+        print("Warning: The pvd file contains irregularly spaced outputs.")
 
     df = pd.DataFrame({'datetime':times, 'vtu_paths':vtu_paths})
     # df = df.set_index('datetime')
