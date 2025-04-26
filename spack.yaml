@@ -1,29 +1,3 @@
 spack:
-  specs:
-    - "vtk@9.2: +python"
-    - "py-numpy"
-    - 'py-xarray +io +viz +parallel'
-    - "py-netcdf4"
-    - "py-pandas"
-    - "gdal@3.5: +python  +hdf5 +netcdf"
-    - "py-dask"
-    - "py-pyvista@0.29:"
-    - "py-rioxarray"
-    - "py-rasterio"
-    - "py-cftime"
-    - "py-pyproj"
-    - "py-matplotlib"
-    - "py-pyarrow"
-    - "py-lz4"
-    - "py-contourpy"
-    - "py-fonttools"
-    - "py-bokeh"
-    - "py-tornado"
-    - "py-xyzservices"
-    - "py-distributed"
-    - "py-psutil"
-    - "py-msgpack"
-    - "py-sortedcontainers"
-    - "py-tblib"
-    - "py-zict"
+  specs: [py-pychm]
   view: ./view-pychm
