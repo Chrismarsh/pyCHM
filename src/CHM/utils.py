@@ -68,6 +68,7 @@ def open_pvd(fname):
     for t in timesteps:
         ts.append(np.datetime64(int(t.get('timestep')), 's'))
 
+    ts = ts[::nranks]
     times = pd.to_datetime(ts)
 
 
