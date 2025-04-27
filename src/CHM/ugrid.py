@@ -22,7 +22,7 @@ def vtu_to_ugrid(pvd, outnc, variables=None, only_topology=False, append=False, 
         excludelist = ['proj4', 'global_id']
         for v in blocks[0].array_names:
             if len(blocks[0][v].shape) == 1 and v not in excludelist: # don't add the vectors
-                a = v.replace('[param] ', '_param_').replace('/', '') # sanitize the name, this should be fixed in CHM though
+                a = v.replace('[param] ', '_param_').replace('/', '___') # sanitize the name, this should be fixed in CHM though
                 variables.append(a)
 
     print('Merging blocks...')
@@ -170,8 +170,8 @@ def vtu_to_ugrid(pvd, outnc, variables=None, only_topology=False, append=False, 
         mesh = blocks.combine()
         print(row)
         for var in variables:
-
-            ds.variables[var][i, :] = mesh[var]
+            # undo the name sanitation to query from the pvd
+            ds.variables[var][i, :] = mesh[var.replace('_param_', '[param] ').replace('___', '/')]
 
         i = i + 1
 
