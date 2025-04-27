@@ -10,5 +10,10 @@
 /pyCHM/__pycache__/*
 /debugging/*
 /venv*
-/examples
+/testing/*
+/spack-deploy
 *.egg-info*
+/.spack-env/*
+/._view-pychm/*
+*.egg-info*
+.idea
