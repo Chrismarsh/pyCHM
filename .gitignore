@@ -17,3 +17,5 @@
 /._view-pychm/*
 *.egg-info*
 .idea
+view-pychm
+spack.lock
