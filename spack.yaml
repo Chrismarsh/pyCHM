@@ -1,3 +1,23 @@
+# spacktivate .
+# spack install --only dependencies
+# will build the env needed but not isntall pychm
 spack:
-  specs: [py-pychm]
+  specs:
+    - "vtk +python@9.2:"
+    - "py-numpy@1.26:"
+    - "py-xarray@2025: +io +viz +parallel"
+    - "py-uxarray"
+    - "py-netcdf4"
+    - "py-pandas"
+    # - /7uaw5dr
+    - "utf8proc"
+    - "gdal@3.5: +python +netcdf +hdf5 +arrow"
+    - "py-dask"
+    - "py-pyvista@0.29:"
+    - "py-rioxarray@0.19:"
+    - "py-rasterio"
+    - "py-cftime"
+    - "py-pyproj"
+    - "esmf +python"
+    - "py-mpi4py"
   view: ./view-pychm
