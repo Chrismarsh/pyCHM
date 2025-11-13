@@ -9,13 +9,13 @@ from mpi4py import MPI
 import osgeo_utils.gdal_merge
 import glob
 import itertools
-
+import argparse
 from osgeo import gdal
 
 def log(message):
     print(f'[{ESMF.local_pet()}] {message}')
 
-def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative', save_weights_file=None,
+def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative', save_weights_file=None,
                load_weights_file=None, variables=None, time_offsets=None):
     """
     Convert a ugrid file to tiff. The ugrid file needs to come from the pvd to ugrid conversion
@@ -268,3 +268,43 @@ def ugrid2tiff(ugrid_nc, dxdy=0.005, mesh_topology_nc=None, method='conservative
             os.remove(f)
 
     log('Done')
+    
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert CHM UGRID NetCDF to TIFF")
+    parser.add_argument("input_nc", help="Path to the input .nc file")
+    parser.add_argument("--dxdy", type=float, default=0.01,
+                        help="Grid resolution in degrees (default: 0.01)")
+    parser.add_argument("--mesh Optional.", type=str, default=None,
+                        help="If mesh topology is stored in another file")
+    parser.add_argument("--method", type=str, default="bilinear",
+                        choices=["bilinear", "conservative"],
+                        help="Interpolation method (default: conservative)")
+    parser.add_argument(
+        "--timeoffset",
+        type=int,
+        nargs="+",             # allows one or more values
+        default=None,
+        help="Time offset(s) in hours (e.g., --timeoffset 0 6 12 18)",
+    )
+    parser.add_argument(
+        "--variables",
+        type=str,
+        nargs="+",             # allows one or more values
+        default=None,
+        help="Variables (e.g., --variables t swe). Default is to convert all variables",
+    )
+
+    args = parser.parse_args()
+
+    ugrid2tiff(args.input_nc,
+               dxdy=args.dxdy,
+               method=args.method,
+               mesh_topology_nc=args.mesh,
+               time_offsets=args.timeoffset,
+               variables=args.variables
+    )
+
+if __name__ == "__main__":
+    main()
