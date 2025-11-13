@@ -11,6 +11,7 @@ import glob
 import itertools
 import argparse
 from osgeo import gdal
+gdal.UseExceptions()
 
 def log(message):
     print(f'[{ESMF.local_pet()}] {message}')
@@ -225,6 +226,8 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     df.close()
     comm.barrier()
 
+    return
+
     log('Merging tiffs')
     product = None
     if ESMF.local_pet() == 0:
@@ -276,7 +279,7 @@ def main():
     parser.add_argument("input_nc", help="Path to the input .nc file")
     parser.add_argument("--dxdy", type=float, default=0.01,
                         help="Grid resolution in degrees (default: 0.01)")
-    parser.add_argument("--mesh Optional.", type=str, default=None,
+    parser.add_argument("--mesh", type=str, default=None,
                         help="If mesh topology is stored in another file")
     parser.add_argument("--method", type=str, default="bilinear",
                         choices=["bilinear", "conservative"],
