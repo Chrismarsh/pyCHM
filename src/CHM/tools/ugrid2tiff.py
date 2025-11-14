@@ -2,22 +2,255 @@ import sys
 import numpy as np
 import esmpy as ESMF
 import rasterio
+from rasterio.crs import CRS
 import xarray as xr
 import rioxarray  # for xarray.rio
 import os
+import shutil
 from mpi4py import MPI
 import osgeo_utils.gdal_merge
 import glob
 import itertools
 import argparse
+
 from osgeo import gdal
 gdal.UseExceptions()
+
+import os
+import shutil
+
+
+class UnsafePathError(RuntimeError):
+    """Raised when a destructive operation is requested on a dangerous path."""
+    pass
+
+
+def _is_parent_or_same(parent: str, child: str) -> bool:
+    """Return True if `parent` is the same as or an ancestor of `child`."""
+    parent = os.path.realpath(os.path.abspath(parent)).rstrip(os.sep)
+    child = os.path.realpath(os.path.abspath(child)).rstrip(os.sep)
+    if parent == child:
+        return True
+    return child.startswith(parent + os.sep)
+
+
+def safe_rmtree(
+    path: str,
+    *,
+    protect_cwd: bool = True,
+    protect_home: bool = True,
+    protect_root: bool = True,
+    allow_symlink: bool = False,
+) -> None:
+    """
+    Safely remove a directory tree.
+
+    Guards against catastrophes like:
+      - '.', '..'
+      - current working directory
+      - home directory
+      - filesystem root
+      - ancestors of CWD / $HOME (by default)
+
+    Parameters
+    ----------
+    path : str
+        Path to remove.
+    protect_cwd : bool
+        Refuse to remove the current working directory or any of its ancestors.
+    protect_home : bool
+        Refuse to remove the user's home directory or any of its ancestors.
+    protect_root : bool
+        Refuse to remove the filesystem root '/'.
+    allow_symlink : bool
+        If False, refuse to operate on symlinks to avoid surprises.
+    """
+    if not path:
+        raise UnsafePathError("Refusing to remove empty path string.")
+
+    # Normalize and resolve symlinks
+    path = os.path.realpath(os.path.abspath(path))
+
+    if not os.path.exists(path):
+        # Nothing to do; silently return
+        return
+
+    # Symlink protection
+    if os.path.islink(path) and not allow_symlink:
+        raise UnsafePathError(f"Refusing to remove symlink path: {path}")
+
+    # Collect reference points
+    cwd = os.path.realpath(os.getcwd())
+    home = os.path.realpath(os.path.expanduser("~"))
+    root = os.path.realpath(os.path.abspath(os.sep))
+
+    # Root protection
+    if protect_root and path == root:
+        raise UnsafePathError("Refusing to remove filesystem root '/'.")
+
+    # CWD protection: don't remove cwd or any ancestor of cwd
+    if protect_cwd and _is_parent_or_same(path, cwd):
+        raise UnsafePathError(f"Refusing to remove path that is cwd or its ancestor: {path}")
+
+    # HOME protection: don't remove home or any ancestor of home
+    if protect_home and _is_parent_or_same(path, home):
+        raise UnsafePathError(f"Refusing to remove path that is home or its ancestor: {path}")
+
+    # All checks passed: actually delete
+    shutil.rmtree(path)
+
+
+def _prepare_coord_array(data):
+    """Normalize coordinate arrays for storage."""
+    arr_data = np.asarray(data)
+    attrs = {}
+    if np.issubdtype(arr_data.dtype, np.datetime64):
+        arr_data = arr_data.astype('datetime64[ns]').astype('int64')
+        attrs['units'] = 'nanoseconds since 1970-01-01T00:00:00'
+        attrs['calendar'] = 'proleptic_gregorian'
+    return arr_data, attrs
+
+
+GRID_MAPPING_VAR = 'spatial_ref'
+
+
+def _crs_metadata():
+    crs = CRS.from_epsg(4326)
+    ellipsoid = crs.ellipsoid
+    return {
+        'spatial_ref': crs.to_wkt(),
+        'grid_mapping_name': 'latitude_longitude',
+        'epsg_code': f'EPSG:{crs.to_epsg()}',
+        'semi_major_axis': ellipsoid.semi_major_metre,
+        'inverse_flattening': ellipsoid.inverse_flattening,
+        'longitude_of_prime_meridian': 0.0,
+        'latitude_of_prime_meridian': 0.0
+    }
+
+
+def _write_crs_variable(root):
+    attrs = _crs_metadata()
+    crs_array = root.create_array(
+        GRID_MAPPING_VAR,
+        shape=(),
+        dtype='int8',
+        chunks=(),
+        dimension_names=[],
+        compressors=[],
+    )
+    crs_array[...] = 0
+    crs_array.attrs['_ARRAY_DIMENSIONS'] = []
+    for key, value in attrs.items():
+        crs_array.attrs[key] = value
+
+
+    arr_data = np.asarray(data)
+    attrs = {}
+    if np.issubdtype(arr_data.dtype, np.datetime64):
+        arr_data = arr_data.astype('datetime64[ns]').astype('int64')
+        attrs['units'] = 'nanoseconds since 1970-01-01T00:00:00'
+        attrs['calendar'] = 'proleptic_gregorian'
+    return arr_data, attrs
+
+def _initialize_tiff_path(path, overwrite=False):
+
+    if os.path.isdir(path):
+        if not overwrite:
+            raise FileExistsError(f"Tiff path '{path}' already exists. Use --zarr-overwrite to replace it.")
+        safe_rmtree(path)
+
+    os.makedirs(path)
+
+def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
+                           chunk_time=1, chunk_y=512, chunk_x=512, overwrite=False):
+    """Create an empty Zarr store compatible with xarray region writes."""
+    try:
+        import zarr
+    except ImportError as exc:  # pragma: no cover - import guard
+        raise ImportError("Zarr output requested but the 'zarr' package is missing") from exc
+
+    if os.path.isdir(path):
+        if not overwrite:
+            raise FileExistsError(f"Zarr path '{path}' already exists. Use --zarr-overwrite to replace it.")
+        safe_rmtree(path)
+
+    root = zarr.open_group(path, mode='w')
+
+    coord_datasets = {
+        'time': (time_values, ['time']),
+        'y': (y_coords, ['y']),
+        'x': (x_coords, ['x'])
+    }
+    for name, (data, dims) in coord_datasets.items():
+        arr_data, coord_attrs = _prepare_coord_array(data)
+        arr = root.create_array(
+            name,
+            shape=arr_data.shape,
+            dtype=arr_data.dtype,
+            chunks=arr_data.shape,
+            dimension_names=dims,
+            compressors=[],
+        )
+        arr[...] = arr_data
+        arr.attrs['_ARRAY_DIMENSIONS'] = dims
+        for key, value in coord_attrs.items():
+            arr.attrs[key] = value
+
+    chunks = (max(chunk_time, 1), max(chunk_y, 1), max(chunk_x, 1))
+
+    for var in variables:
+        dims = ['time', 'y', 'x']
+        arr = root.create_array(
+            var,
+            shape=(len(time_values), len(y_coords), len(x_coords)),
+            dtype='f4',
+            chunks=chunks,
+            fill_value=np.nan,
+            dimension_names=dims,
+            compressors=[],
+        )
+        arr.attrs['_ARRAY_DIMENSIONS'] = dims
+
+
+def _write_zarr_chunk(zarr_path, var_name, time_index, time_value, time_dtype, data_chunk,
+                      y_coords, x_coords, y_slice, x_slice):
+    """Write a chunk for a single variable/time step into the Zarr store."""
+    y_len = max(0, y_slice.stop - y_slice.start)
+    x_len = max(0, x_slice.stop - x_slice.start)
+    if y_len == 0 or x_len == 0 or data_chunk.size == 0:
+        return
+
+    if data_chunk.shape != (y_len, x_len):
+        raise ValueError(
+            f"Data chunk shape {data_chunk.shape} does not match slice lengths {(y_len, x_len)}"
+        )
+
+    chunk_ds = xr.Dataset(
+        {
+            var_name: (('time', 'latitude', 'longitude'), data_chunk[np.newaxis, ...])
+        },
+        coords={
+            'time': xr.DataArray(np.array([time_value], dtype=time_dtype), dims='time'),
+            'latitude': xr.DataArray(y_coords[y_slice], dims='latitude'),
+            'longitude': xr.DataArray(x_coords[x_slice], dims='longitude')
+        }
+    )
+
+    region = {
+        'time': slice(time_index, time_index + 1),
+        'latitude': y_slice,
+        'longitude': x_slice
+    }
+    chunk_ds.to_zarr(zarr_path, mode='r+', region=region, consolidated=False)
+
+
 
 def log(message):
     print(f'[{ESMF.local_pet()}] {message}')
 
 def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative', save_weights_file=None,
-               load_weights_file=None, variables=None, time_offsets=None):
+               load_weights_file=None, variables=None, time_offsets=None, zarr_path=None,
+               overwrite=False, zarr_chunk_y=512, zarr_chunk_x=512, tiff_path=None):
     """
     Convert a ugrid file to tiff. The ugrid file needs to come from the pvd to ugrid conversion
 
@@ -33,10 +266,22 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     :param save_weights_file:
     :param load_weights_file:
     :param variables:
+    :param time_offsets:
+    :param zarr_path: Optional path to write the structured grid dataset as Zarr.
+    :param overwrite: Overwrite an existing Zarr store if True.
+    :param zarr_chunk_y: Chunk height to use for Zarr variables.
+    :param zarr_chunk_x: Chunk width to use for Zarr variables.
+    :param write_tiffs: Disable GeoTIFF emission when set to False.
     :return:
     """
     # mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
+
+    zarr_enabled = zarr_path is not None
+    tiff_enabled = tiff_path is not None
+
+    if not tiff_enabled and not zarr_enabled:
+        raise ValueError('At least one output target (TIFF or Zarr) must be enabled')
 
     if save_weights_file is not None and load_weights_file is not None:
         raise Exception("Cannot have both save_weights_file and load_weights_file set")
@@ -106,8 +351,12 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     gridYCenter = grid.get_coords(1)
 
     # RLO-v2: adjust coordinate array to bounds of the current PET (rank)
-    x_center_par = x_center[grid.lower_bounds[ESMF.StaggerLoc.CENTER][0]:grid.upper_bounds[ESMF.StaggerLoc.CENTER][0]]
-    y_center_par = y_center[grid.lower_bounds[ESMF.StaggerLoc.CENTER][1]:grid.upper_bounds[ESMF.StaggerLoc.CENTER][1]]
+    center_lb = grid.lower_bounds[ESMF.StaggerLoc.CENTER]
+    center_ub = grid.upper_bounds[ESMF.StaggerLoc.CENTER]
+    x_slice = slice(center_lb[0], center_ub[0])
+    y_slice = slice(center_lb[1], center_ub[1])
+    x_center_par = x_center[x_slice]
+    y_center_par = y_center[y_slice]
 
     # RLO: set Grid center coordinates as a 2D array (this can also be done 1d)
     gridXCenter[...] = x_center_par.reshape((x_center_par.size, 1))
@@ -142,7 +391,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     dstfield = ESMF.Field(grid, staggerloc=ESMF.StaggerLoc.CENTER)
 
     regrid_method = ESMF.RegridMethod.CONSERVE if method == 'conservative' else ESMF.RegridMethod.BILINEAR
-    log(f"""Using {'ESMF.RegridMethod.CONSERVE' if method == 'conservative' else 'ESMF.RegridMethod.BILINEAR'} regridder""")
+    # log(f"""Using {'ESMF.RegridMethod.CONSERVE' if method == 'conservative' else 'ESMF.RegridMethod.BILINEAR'} regridder""")
 
     # clean up old weight file and
     if save_weights_file is not None and comm.Get_rank() == 0:
@@ -182,9 +431,38 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     if time_offsets is None:
         time_offsets = range(0, df.time.shape[0])
 
-    for ts in time_offsets:
+    time_offsets = list(time_offsets)
+    if len(time_offsets) == 0:
+        log('No time offsets provided; nothing to process.')
+        df.close()
+        return
+
+    zarr_time_values = None
+    zarr_time_dtype = None
+    if zarr_enabled:
+        if comm.Get_rank() == 0:
+            time_coord_raw = df.time.isel(time=time_offsets).load().data
+            zarr_time_values, _ = _prepare_coord_array(time_coord_raw)
+            zarr_time_dtype = zarr_time_values.dtype
+            log(f'Initializing Zarr store at {zarr_path}')
+            _initialize_zarr_store(
+
+                zarr_path, variables, time_coord_raw, y_center, x_center,
+                chunk_time=1, chunk_y=zarr_chunk_y, chunk_x=zarr_chunk_x, overwrite=overwrite
+            )
+        zarr_time_values = comm.bcast(zarr_time_values, root=0)
+        zarr_time_dtype = comm.bcast(zarr_time_dtype, root=0)
+        comm.barrier()
+
+    if tiff_enabled:
+        if comm.Get_rank() == 0:
+            log(f"Initializing Tiff output at {tiff_path}")
+            _initialize_tiff_path(tiff_path,)
+
+    for time_index, ts in enumerate(time_offsets):
 
         time = str(df.time[ts].dt.strftime('%Y%m%dT%H%M%S').data)
+        time_value = zarr_time_values[time_index] if zarr_time_values is not None else None
 
         for var in variables:
             log(f'{time} - {var}')
@@ -193,27 +471,40 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
             dstfield.data[...] = np.nan
 
             dstfield = regrid(srcfield, dstfield, zero_region=ESMF.Region.SELECT)
+            data_yx = dstfield.data.T
 
-            tiff = xr.DataArray(np.flip(dstfield.data.T, axis=0), name=var,
-                               coords={'y': y_center_par.data,
-                                       'x': x_center_par.data
-                                       },
-                               dims=['y', 'x'])
-            tiff = tiff.rio.write_nodata(-9999.0)
-            tiff = tiff.rio.set_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
-            var_san = var.replace('[', '_').replace(']', '_')
+            if zarr_enabled:
+                has_data = data_yx.size > 0
+                for writer_rank in range(comm.Get_size()):
+                    if comm.Get_rank() == writer_rank and has_data:
+                        _write_zarr_chunk(
+                            zarr_path, var, time_index, time_value, zarr_time_dtype,
+                            data_yx.astype(np.float32, copy=True),
+                            y_center, x_center, y_slice, x_slice
+                        )
+                    comm.barrier()
 
-            # r = tiff.rio.resolution(recalc=True)
-            # b = tiff.rio.bounds(recalc=True)
-            # # print(r)
-            # print(b)
-            # geotransform = (b[0], r[0], 0.0,
-            #                 b[3], 0.0, -r[1] )
-            # a = Affine.from_gdal(*geotransform)
-            # print(a)
-            # tiff = tiffrio.write_transform(transform=a).
+            if tiff_enabled:
+                tiff = xr.DataArray(np.flip(data_yx, axis=0), name=var,
+                                   coords={'y': y_center_par.data,
+                                           'x': x_center_par.data
+                                           },
+                                   dims=['y', 'x'])
+                tiff = tiff.rio.write_nodata(-9999.0)
+                tiff = tiff.rio.set_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
+                var_san = var.replace('[', '_').replace(']', '_')
 
-            tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
+                # r = tiff.rio.resolution(recalc=True)
+                # b = tiff.rio.bounds(recalc=True)
+                # # print(r)
+                # print(b)
+                # geotransform = (b[0], r[0], 0.0,
+                #                 b[3], 0.0, -r[1] )
+                # a = Affine.from_gdal(*geotransform)
+                # print(a)
+                # tiff = tiffrio.write_transform(transform=a).
+
+                tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
             # don't want to corrupt the srcfield/dstfields by partially writting into them
@@ -221,56 +512,55 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
         processed_times.append(time)
 
-    log('Done regridding to partial tiffs')
     comm.barrier()
     df.close()
     comm.barrier()
 
-    return
 
-    log('Merging tiffs')
-    product = None
-    if ESMF.local_pet() == 0:
+    if tiff_enabled:
+        log('Merging tiffs')
+        product = None
+        if ESMF.local_pet() == 0:
 
-        var_san = [var.replace('[', '_').replace(']', '_') for var in variables]
+            var_san = [var.replace('[', '_').replace(']', '_') for var in variables]
 
-        product = [x for x in itertools.product(var_san, processed_times)]
-        product = np.array_split(product, ESMF.pet_count())
+            product = [x for x in itertools.product(var_san, processed_times)]
+            product = np.array_split(product, ESMF.pet_count())
 
-    product = comm.scatter(product, root=0)
-    log(f'PET{ESMF.local_pet()} has {product}')
+        product = comm.scatter(product, root=0)
+        # log(f'PET{ESMF.local_pet()} has {product}')
 
-    for prod in product:
-        var, time = prod
-        files = glob.glob(f'*-{var}-{time}-{dxdy}x{dxdy}-output.tiff')
-        if len(files) != ESMF.pet_count():
-            raise Exception(f"Missing files for {var} {time}")
+        for prod in product:
+            var, time = prod
+            files = glob.glob(f'*-{var}-{time}-{dxdy}x{dxdy}-output.tiff')
+            if len(files) != ESMF.pet_count():
+                raise Exception(f"Missing files for {var} {time}")
 
-        parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
-        osgeo_utils.gdal_merge.main(parameters)
+            parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
+            osgeo_utils.gdal_merge.main(parameters)
 
-        ds = gdal.Open(f"{var}-{dxdy}x{dxdy}_{time}.tiff", gdal.GA_Update)
-        gt = list(ds.GetGeoTransform())
+            ds = gdal.Open(f"{var}-{dxdy}x{dxdy}_{time}.tiff", gdal.GA_Update)
+            gt = list(ds.GetGeoTransform())
 
-        ## Y_geo = GT(3) + X_pixel * GT(4) + Y_line * GT(5)
+            ## Y_geo = GT(3) + X_pixel * GT(4) + Y_line * GT(5)
 
 
-        ulx, xres, xskew, lly, yskew, yres = ds.GetGeoTransform()
-        uly = lly + (ds.RasterYSize * yres)
+            ulx, xres, xskew, lly, yskew, yres = ds.GetGeoTransform()
+            uly = lly + (ds.RasterYSize * yres)
 
-        print(gt)
-        print(f'lly={lly} ds.RasterYSize={ds.RasterYSize} yres={yres} ==> uly {uly}')
-        gt[3] = uly
-        gt[5] = -gt[5]
-        ds.SetGeoTransform(gt)
-        ds.FlushCache()
-        ds = None
-        print(gt)
+            # print(gt)
+            # print(f'lly={lly} ds.RasterYSize={ds.RasterYSize} yres={yres} ==> uly {uly}')
+            gt[3] = uly
+            gt[5] = -gt[5]
+            ds.SetGeoTransform(gt)
+            ds.FlushCache()
+            ds = None
+            print(gt)
 
-        for f in files:
-            os.remove(f)
+            for f in files:
+                os.remove(f)
 
-    log('Done')
+        log('Done')
     
 
 
@@ -298,15 +588,55 @@ def main():
         default=None,
         help="Variables (e.g., --variables t swe). Default is to convert all variables",
     )
+    parser.add_argument(
+        "--zarr-output",
+        type=str,
+        default=None,
+        help="Path to write the structured grid dataset as Zarr",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Allow overwriting an existing Zarr and/or Tiff output directory",
+    )
+    parser.add_argument(
+        "--zarr-chunk-y",
+        type=int,
+        default=512,
+        help="Chunk height (number of rows) to use when writing Zarr",
+    )
+    parser.add_argument(
+        "--zarr-chunk-x",
+        type=int,
+        default=512,
+        help="Chunk width (number of columns) to use when writing Zarr",
+    )
+    parser.add_argument(
+        "--tiff-output",
+        action="store_true",
+        default=None,
+        help="Path to write the structured grid dataset as GeoTiffs",
+    )
 
     args = parser.parse_args()
+
+    if args.no_tiff and args.zarr_output is None:
+        parser.error("--no-tiff requires --zarr-output to be set")
+
+    if not _safe_path(args.tiff_output) or not _safe_path(args.zarr_output):
+        parser.error("zarr or tiff output needs to be a safe folder path.")
 
     ugrid2tiff(args.input_nc,
                dxdy=args.dxdy,
                method=args.method,
                mesh_topology_nc=args.mesh,
                time_offsets=args.timeoffset,
-               variables=args.variables
+               variables=args.variables,
+               zarr_path=args.zarr_output,
+               overwrite=args.zarr_overwrite,
+               zarr_chunk_y=args.zarr_chunk_y,
+               zarr_chunk_x=args.zarr_chunk_x,
+               tiff_path=args.tiff_output
     )
 
 if __name__ == "__main__":
