@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import esmpy as ESMF
 import rasterio
+import zarr
 from rasterio.crs import CRS
 import xarray as xr
 import rioxarray  # for xarray.rio
@@ -12,12 +13,11 @@ import osgeo_utils.gdal_merge
 import glob
 import itertools
 import argparse
+from pathlib import Path
 
 from osgeo import gdal
 gdal.UseExceptions()
 
-import os
-import shutil
 
 
 class UnsafePathError(RuntimeError):
@@ -116,13 +116,20 @@ GRID_MAPPING_VAR = 'spatial_ref'
 
 def _crs_metadata():
     crs = CRS.from_epsg(4326)
-    ellipsoid = crs.ellipsoid
+    epsg_code = crs.to_epsg() or 4326
+    semi_major = 6378137.0
+    inverse_flattening = 298.257223563
+    ellipsoid = getattr(crs, 'ellipsoid', None)
+    if ellipsoid is not None:
+        semi_major = getattr(ellipsoid, 'semi_major_metre', semi_major)
+        inverse_flattening = getattr(ellipsoid, 'inverse_flattening', inverse_flattening)
+
     return {
         'spatial_ref': crs.to_wkt(),
         'grid_mapping_name': 'latitude_longitude',
-        'epsg_code': f'EPSG:{crs.to_epsg()}',
-        'semi_major_axis': ellipsoid.semi_major_metre,
-        'inverse_flattening': ellipsoid.inverse_flattening,
+        'epsg_code': f'EPSG:{epsg_code}',
+        'semi_major_axis': semi_major,
+        'inverse_flattening': inverse_flattening,
         'longitude_of_prime_meridian': 0.0,
         'latitude_of_prime_meridian': 0.0
     }
@@ -130,27 +137,22 @@ def _crs_metadata():
 
 def _write_crs_variable(root):
     attrs = _crs_metadata()
-    crs_array = root.create_array(
-        GRID_MAPPING_VAR,
-        shape=(),
-        dtype='int8',
-        chunks=(),
-        dimension_names=[],
-        compressors=[],
-    )
+    if GRID_MAPPING_VAR in root:
+        crs_array = root[GRID_MAPPING_VAR]
+    else:
+        crs_array = root.create_array(
+            GRID_MAPPING_VAR,
+            shape=(),
+            dtype='int8',
+            chunks=(),
+            dimension_names=[],
+            compressors=[],
+        )
     crs_array[...] = 0
     crs_array.attrs['_ARRAY_DIMENSIONS'] = []
     for key, value in attrs.items():
         crs_array.attrs[key] = value
 
-
-    arr_data = np.asarray(data)
-    attrs = {}
-    if np.issubdtype(arr_data.dtype, np.datetime64):
-        arr_data = arr_data.astype('datetime64[ns]').astype('int64')
-        attrs['units'] = 'nanoseconds since 1970-01-01T00:00:00'
-        attrs['calendar'] = 'proleptic_gregorian'
-    return arr_data, attrs
 
 def _initialize_tiff_path(path, overwrite=False):
 
@@ -164,22 +166,19 @@ def _initialize_tiff_path(path, overwrite=False):
 def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
                            chunk_time=1, chunk_y=512, chunk_x=512, overwrite=False):
     """Create an empty Zarr store compatible with xarray region writes."""
-    try:
-        import zarr
-    except ImportError as exc:  # pragma: no cover - import guard
-        raise ImportError("Zarr output requested but the 'zarr' package is missing") from exc
-
     if os.path.isdir(path):
         if not overwrite:
             raise FileExistsError(f"Zarr path '{path}' already exists. Use --zarr-overwrite to replace it.")
         safe_rmtree(path)
 
     root = zarr.open_group(path, mode='w')
+    root.attrs.setdefault('Conventions', 'CF-1.8, GeoZarr-1.0')
+    root.attrs.setdefault('geospatial_crs', 'EPSG:4326')
 
     coord_datasets = {
         'time': (time_values, ['time']),
-        'y': (y_coords, ['y']),
-        'x': (x_coords, ['x'])
+        'latitude': (y_coords, ['latitude']),
+        'longitude': (x_coords, ['longitude'])
     }
     for name, (data, dims) in coord_datasets.items():
         arr_data, coord_attrs = _prepare_coord_array(data)
@@ -199,7 +198,7 @@ def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
     chunks = (max(chunk_time, 1), max(chunk_y, 1), max(chunk_x, 1))
 
     for var in variables:
-        dims = ['time', 'y', 'x']
+        dims = ['time', 'latitude', 'longitude']
         arr = root.create_array(
             var,
             shape=(len(time_values), len(y_coords), len(x_coords)),
@@ -210,6 +209,9 @@ def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
             compressors=[],
         )
         arr.attrs['_ARRAY_DIMENSIONS'] = dims
+        arr.attrs['grid_mapping'] = GRID_MAPPING_VAR
+
+    _write_crs_variable(root)
 
 
 def _write_zarr_chunk(zarr_path, var_name, time_index, time_value, time_dtype, data_chunk,
@@ -235,6 +237,7 @@ def _write_zarr_chunk(zarr_path, var_name, time_index, time_value, time_dtype, d
             'longitude': xr.DataArray(x_coords[x_slice], dims='longitude')
         }
     )
+    chunk_ds[var_name].attrs['grid_mapping'] = GRID_MAPPING_VAR
 
     region = {
         'time': slice(time_index, time_index + 1),
@@ -323,9 +326,9 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
     numX, numY = int(x/dxdy), int(y/dxdy)
 
-    log(f'numX, numY = {numX}, {numY}')
+    # log(f'numX, numY = {numX}, {numY}')
 
-    log(f'umin={mesh.coords[nodes][u].min()} umax={mesh.coords[nodes][u].max()} vmin={mesh.coords[nodes][v].min()} vmax={mesh.coords[nodes][v].max()} ')
+    # log(f'umin={mesh.coords[nodes][u].min()} umax={mesh.coords[nodes][u].max()} vmin={mesh.coords[nodes][v].min()} vmax={mesh.coords[nodes][v].max()} ')
 
     # cell centres
     dxdy2 = dxdy/2.
@@ -341,7 +344,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
 
     max_index = np.array([len(x_center), len(y_center)])
-    log( f' max_index={max_index}')
+    # log( f' max_index={max_index}')
 
 
     grid = ESMF.Grid(max_index, staggerloc=[ESMF.StaggerLoc.CENTER, ESMF.StaggerLoc.CORNER], coord_sys=ESMF.CoordSys.SPH_DEG)
@@ -457,7 +460,9 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     if tiff_enabled:
         if comm.Get_rank() == 0:
             log(f"Initializing Tiff output at {tiff_path}")
-            _initialize_tiff_path(tiff_path,)
+            _initialize_tiff_path(tiff_path, overwrite=overwrite)
+
+        tiff_path = Path(tiff_path)
 
     for time_index, ts in enumerate(time_offsets):
 
@@ -486,12 +491,12 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
             if tiff_enabled:
                 tiff = xr.DataArray(np.flip(data_yx, axis=0), name=var,
-                                   coords={'y': y_center_par.data,
-                                           'x': x_center_par.data
+                                   coords={'latitude': y_center_par.data,
+                                           'longitude': x_center_par.data
                                            },
-                                   dims=['y', 'x'])
+                                   dims=['latitude', 'longitude'])
                 tiff = tiff.rio.write_nodata(-9999.0)
-                tiff = tiff.rio.set_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
+                tiff = tiff.rio.write_crs('+proj=longlat +datum=WGS84 +no_defs +type=crs')
                 var_san = var.replace('[', '_').replace(']', '_')
 
                 # r = tiff.rio.resolution(recalc=True)
@@ -504,7 +509,7 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
                 # print(a)
                 # tiff = tiffrio.write_transform(transform=a).
 
-                tiff.rio.to_raster(f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
+                tiff.rio.to_raster(tiff_path / f'{ESMF.local_pet()}-{var_san}-{time}-{dxdy}x{dxdy}-output.tiff')
 
             # Wait to make sure everyone has written out this timestep + variable.
             # don't want to corrupt the srcfield/dstfields by partially writting into them
@@ -532,14 +537,14 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
         for prod in product:
             var, time = prod
-            files = glob.glob(f'*-{var}-{time}-{dxdy}x{dxdy}-output.tiff')
+            files = glob.glob( str(tiff_path / f'*-{var}-{time}-{dxdy}x{dxdy}-output.tiff'))
             if len(files) != ESMF.pet_count():
                 raise Exception(f"Missing files for {var} {time}")
 
-            parameters = ['', '-o', f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
+            parameters = ['', '-o', tiff_path / f"{var}-{dxdy}x{dxdy}_{time}.tiff", '-n', '-9999', '-a_nodata', '-9999'] + files + ['-co', 'COMPRESS=LZW']
             osgeo_utils.gdal_merge.main(parameters)
 
-            ds = gdal.Open(f"{var}-{dxdy}x{dxdy}_{time}.tiff", gdal.GA_Update)
+            ds = gdal.Open(tiff_path / f"{var}-{dxdy}x{dxdy}_{time}.tiff", gdal.GA_Update)
             gt = list(ds.GetGeoTransform())
 
             ## Y_geo = GT(3) + X_pixel * GT(4) + Y_line * GT(5)
@@ -555,7 +560,6 @@ def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
             ds.SetGeoTransform(gt)
             ds.FlushCache()
             ds = None
-            print(gt)
 
             for f in files:
                 os.remove(f)
@@ -613,18 +617,29 @@ def main():
     )
     parser.add_argument(
         "--tiff-output",
-        action="store_true",
+        type=str,
         default=None,
         help="Path to write the structured grid dataset as GeoTiffs",
     )
 
     args = parser.parse_args()
 
-    if args.no_tiff and args.zarr_output is None:
+    if args.tiff_output is None and args.zarr_output is None:
         parser.error("--no-tiff requires --zarr-output to be set")
 
-    if not _safe_path(args.tiff_output) or not _safe_path(args.zarr_output):
-        parser.error("zarr or tiff output needs to be a safe folder path.")
+    def _is_safe_path(path):
+        path = os.path.abspath(path)
+        cwd = os.path.abspath(os.getcwd())
+
+        # Safety checks
+        if path in (cwd, os.path.dirname(cwd), "/"):
+            raise ValueError(f"Refusing to operate on unsafe path: {path}")
+
+    if args.tiff_output is not None:
+        _is_safe_path(args.tiff_output)
+
+    if args.zarr_output is not None:
+        _is_safe_path(args.zarr_output)
 
     ugrid2tiff(args.input_nc,
                dxdy=args.dxdy,
@@ -633,7 +648,7 @@ def main():
                time_offsets=args.timeoffset,
                variables=args.variables,
                zarr_path=args.zarr_output,
-               overwrite=args.zarr_overwrite,
+               overwrite=args.overwrite,
                zarr_chunk_y=args.zarr_chunk_y,
                zarr_chunk_x=args.zarr_chunk_x,
                tiff_path=args.tiff_output
