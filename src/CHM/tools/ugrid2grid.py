@@ -251,7 +251,7 @@ def _write_zarr_chunk(zarr_path, var_name, time_index, time_value, time_dtype, d
 def log(message):
     print(f'[{ESMF.local_pet()}] {message}')
 
-def ugrid2tiff(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative', save_weights_file=None,
+def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative', save_weights_file=None,
                load_weights_file=None, variables=None, time_offsets=None, zarr_path=None,
                overwrite=False, zarr_chunk_y=512, zarr_chunk_x=512, tiff_path=None):
     """
@@ -641,7 +641,7 @@ def main():
     if args.zarr_output is not None:
         _is_safe_path(args.zarr_output)
 
-    ugrid2tiff(args.input_nc,
+    ugrid2grid(args.input_nc,
                dxdy=args.dxdy,
                method=args.method,
                mesh_topology_nc=args.mesh,
