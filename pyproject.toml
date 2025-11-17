@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "CHM"
-version = "1.4.3"
+version = "1.4.4"
 authors = [
     {name="Chris Marsh"}
 ]
@@ -17,11 +17,11 @@ dependencies = ['vtk', 'numpy', 'xarray', 'netCDF4', 'pandas',
 
 
 [project.urls]
-Homepage = "https://github.com/Chrismarsh/mesher"
+Homepage = "https://github.com/Chrismarsh/pyCHM"
 
 [project.scripts]
-pvdFromDir = "CHM.tools.pvd_from_dir:main"
-validateJSON = "CHM.tools.validate_json:main"
-windmapper2mesher = "CHM.tools.windmapper2mesher:main"
-vtu2geo = "CHM.tools.vtu2geo:main"
+chm_pvd_from_dir = "CHM.tools.pvd_from_dir:main"
+chm_validateJSON = "CHM.tools.validate_json:main"
+chm_windmapper2mesher = "CHM.tools.windmapper2mesher:main"
+chm_ugrid2grid = "CHM.tools.ugrid2grid:main"
 
