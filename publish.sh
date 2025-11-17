@@ -1,6 +1,7 @@
 set -e
-. ~/Documents/science/code/spack/share/spack/setup-env.sh
+# . ~/Documents/science/code/spack/share/spack/setup-env.sh
 #setup build env
+rm -rf spack-deploy dist
 spack env create -d spack-deploy spack-deploy.yaml
 spack env activate spack-deploy
 spack install
