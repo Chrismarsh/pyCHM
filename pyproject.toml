@@ -12,7 +12,7 @@ description = "python tools for CHM"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ['numpy', 'xarray', 'netCDF4', 'pandas',
-                'gdal', 'dask[complete]', 'uxarray', 'ESMF',
+                'gdal', 'dask[complete]', 'uxarray',
                  'rioxarray', 'rasterio', 'ninja', 'cftime', 'pyproj']
 
 
