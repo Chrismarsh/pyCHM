@@ -20,4 +20,5 @@ spack:
     - "py-pyproj"
     - "esmf +python"
     - "py-mpi4py"
+    - "py-zarr@0.16:"
   view: ./view-pychm
