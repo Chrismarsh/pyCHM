@@ -156,12 +156,8 @@ def _write_crs_variable(root):
 
 def _initialize_tiff_path(path, overwrite=False):
 
-    if os.path.isdir(path):
-        if not overwrite:
-            raise FileExistsError(f"Tiff path '{path}' already exists. Use --zarr-overwrite to replace it.")
-        safe_rmtree(path)
-
-    os.makedirs(path)
+    if not os.path.isdir(path):
+        os.makedirs(path)
 
 def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
                            chunk_time=1, chunk_y=512, chunk_x=512, overwrite=False):
@@ -255,7 +251,7 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
                load_weights_file=None, variables=None, time_offsets=None, zarr_path=None,
                overwrite=False, zarr_chunk_y=512, zarr_chunk_x=512, tiff_path=None):
     """
-    Convert a ugrid file to tiff. The ugrid file needs to come from the pvd to ugrid conversion
+    Converts a ugrid file to zarr or tiff.
 
     df = pc.open_pvd('output_FSM_rhod600/SC.pvd')
     df=df.set_index('datetime')['2017-11-01':'2018-04-03'].reset_index()
