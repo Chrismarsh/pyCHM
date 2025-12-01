@@ -1,9 +1,11 @@
 #!/usr/bin/env python
+"""Build a ParaView Data (PVD) collection from VTU files in the current directory."""
 
 import glob
 import re
 
 def main():
+    """Generate an ``out.pvd`` file by enumerating VTU files sorted by timestep and rank."""
     header = """<?xml version="1.0" encoding="utf-8"?>
     <VTKFile type="Collection" version="0.1">
         <Collection>

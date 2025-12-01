@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+"""Generate a CHM mesher config from a directory of WindNinja/Windmapper GeoTIFFs."""
 
 import numpy as np
 import os 
@@ -9,6 +10,7 @@ import sys
 
 # Converts a directory ``searchpath`` from a set of windmapper inputs to the input mesher info
 def gen_config(searchpath):
+    """Produce ``config_WN.txt`` mapping wind directions to Ninja input files."""
 
     files = glob.glob(f'{searchpath}{os.path.sep}*.tif')
 
@@ -86,6 +88,7 @@ def gen_config(searchpath):
 
 
 def main():
+    """Entry point: parse the search path argument and generate the mesher config."""
     if len(sys.argv) == 1:
         print('Requires input path')
         exit(1)
@@ -96,4 +99,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

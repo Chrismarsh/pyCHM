@@ -1,3 +1,5 @@
+"""Utilities for working with VTU/UGRID datasets through xarray/uxarray."""
+
 import xarray as xr
 import uxarray as ux
 import numpy as np
@@ -44,9 +46,7 @@ def _ugrid_vars_only(ds: xr.Dataset) -> list[str]:
 
 @xr.register_dataset_accessor("chm")
 class GeoAccessor:
-    """
-    xarray extension. Accessed via `.chm` on a dataframe. E.g., ``df.chm.to_raster(...)``
-    """
+    """xarray accessor for CHM convenience helpers, available via `.chm` on a Dataset."""
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
@@ -72,21 +72,17 @@ class GeoAccessor:
         os.remove(outpath+".tmp")
 
     def vars_to_netcdf(self, outpath: str) -> None:
-        """
-        Outputs all variables to netcdf
-        """
+        """Write all variables (without mesh scaffolding) to a NetCDF file."""
         self._obj.to_xarray().to_netcdf(outpath)
 
     def clip(self, lat=None, lon=None, shp_file_path=None) -> ux.UxDataset:
-        """
-        Subsets all variables to the bounding box given by lat and lon min/max bounds
-        """
+        """Subset face-centered variables to a lat/lon bounding box or a geometry extent."""
         ds = self._obj
         d_time = []
         d_notime = []
 
         if lat is None and lon is None and shp_file_path is None:
-            raise Exception("requires bounding box")
+            raise Exception("Requires bounding box given by lat/lon or shpfile.")
 
         if lat is None and lon is None:
             shp = gp.read_file(shp_file_path)
@@ -125,15 +121,6 @@ class GeoAccessor:
 
         return ux.UxDataset(ds, uxgrid=uxg)
 
-    def subset_to_geo_boundingbox(self, shp_file_path: str) -> ux.UxDataset:
-        """
-        Subsets all variables to a bounding box derived from the extern of the geofile,
-        e.g., shapefile, geojson
-        """
-
-
-        return self.subset_to_boundingbox(lat, lon)
-
     def regrid(
         self,
         dxdy: float = 0.01,
@@ -141,9 +128,23 @@ class GeoAccessor:
         duplicate_reducer: str = "mean",
         extra_exclude: list[str] | None = None,   # user overrides, fnmatch patterns
     ) -> xr.Dataset:
-        """
-        Regrids all variables to a structured grid. Uses the Uxarray cython regrid implementation so only
-        appropriate for single-node sized meshes.
+        """Regrid face-centered variables to a structured grid via uxarray bilinear remap.
+
+        Parameters
+        ----------
+        dxdy : float, optional
+            Target grid spacing (degrees) in both lat and lon directions.
+        round_decimals : int, optional
+            Number of decimal places to round resulting lat/lon coordinates.
+        duplicate_reducer : {"mean", "first", "median", "max", "min"}, optional
+            Reduction applied when multiple faces collapse to the same grid cell.
+        extra_exclude : list[str], optional
+            Additional fnmatch patterns to exclude from regridding.
+
+        Returns
+        -------
+        xr.Dataset
+            Structured grid dataset with latitude/longitude coordinates and selected variables.
         """
         obj = self._obj
         # --- normalize to Dataset and pick vars ---

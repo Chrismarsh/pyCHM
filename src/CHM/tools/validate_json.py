@@ -1,9 +1,11 @@
 #!/usr/bin/env python
+"""Lightweight CLI helper to validate JSON syntax for CHM config files."""
 
 import json
 import sys
 
 def main():
+    """Check that the provided JSON file parses without errors and report the result."""
     print('This checks if a json file has correct syntax. It does not check nested json files.')
     print('If this too passes, it does not guarantee the items within the json make sense to CHM!')
 

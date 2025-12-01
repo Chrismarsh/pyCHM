@@ -1,3 +1,6 @@
+"""Convert CHM UGRID NetCDF outputs to structured grid products such as GeoTIFF
+and Zarr using ESMF regridding helpers."""
+
 import sys
 import numpy as np
 import esmpy as ESMF
@@ -21,12 +24,12 @@ gdal.UseExceptions()
 
 
 class UnsafePathError(RuntimeError):
-    """Raised when a destructive operation is requested on a dangerous path."""
+    """Error raised when a destructive operation targets an unsafe path."""
     pass
 
 
 def _is_parent_or_same(parent: str, child: str) -> bool:
-    """Return True if `parent` is the same as or an ancestor of `child`."""
+    """Return True when `parent` resolves to the same path as `child` or one of its ancestors."""
     parent = os.path.realpath(os.path.abspath(parent)).rstrip(os.sep)
     child = os.path.realpath(os.path.abspath(child)).rstrip(os.sep)
     if parent == child:
@@ -42,28 +45,17 @@ def safe_rmtree(
     protect_root: bool = True,
     allow_symlink: bool = False,
 ) -> None:
-    """
-    Safely remove a directory tree.
+    """Delete a directory tree with guardrails to prevent catastrophic removals.
 
-    Guards against catastrophes like:
-      - '.', '..'
-      - current working directory
-      - home directory
-      - filesystem root
-      - ancestors of CWD / $HOME (by default)
+    This helper normalizes paths, rejects empty input, and raises
+    UnsafePathError when the target could compromise cwd, the user's home
+    directory, or the filesystem root. Symlinks are refused by default to
+    avoid surprises.
 
-    Parameters
-    ----------
-    path : str
-        Path to remove.
-    protect_cwd : bool
-        Refuse to remove the current working directory or any of its ancestors.
-    protect_home : bool
-        Refuse to remove the user's home directory or any of its ancestors.
-    protect_root : bool
-        Refuse to remove the filesystem root '/'.
-    allow_symlink : bool
-        If False, refuse to operate on symlinks to avoid surprises.
+    Raises
+    ------
+    UnsafePathError
+        If the path is empty, protected, or a disallowed symlink.
     """
     if not path:
         raise UnsafePathError("Refusing to remove empty path string.")
@@ -101,7 +93,7 @@ def safe_rmtree(
 
 
 def _prepare_coord_array(data):
-    """Normalize coordinate arrays for storage."""
+    """Normalize a coordinate array and return storage-safe values plus attrs."""
     arr_data = np.asarray(data)
     attrs = {}
     if np.issubdtype(arr_data.dtype, np.datetime64):
@@ -115,6 +107,7 @@ GRID_MAPPING_VAR = 'spatial_ref'
 
 
 def _crs_metadata():
+    """Return GeoZarr/CF-compatible CRS attributes for a default EPSG:4326 grid."""
     crs = CRS.from_epsg(4326)
     epsg_code = crs.to_epsg() or 4326
     semi_major = 6378137.0
@@ -136,6 +129,7 @@ def _crs_metadata():
 
 
 def _write_crs_variable(root):
+    """Create or update the grid-mapping variable on the Zarr root with CRS metadata."""
     attrs = _crs_metadata()
     if GRID_MAPPING_VAR in root:
         crs_array = root[GRID_MAPPING_VAR]
@@ -155,13 +149,19 @@ def _write_crs_variable(root):
 
 
 def _initialize_tiff_path(path, overwrite=False):
+    """Ensure the GeoTIFF output directory exists; caller handles overwrite policy."""
 
     if not os.path.isdir(path):
         os.makedirs(path)
 
 def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
                            chunk_time=1, chunk_y=512, chunk_x=512, overwrite=False):
-    """Create an empty Zarr store compatible with xarray region writes."""
+    """Create an empty Zarr store with coordinate arrays and chunked data variables.
+
+    The store is structured for subsequent region writes from multiple MPI ranks
+    using xarray. Coordinates are written once, and each requested variable is
+    initialized with float32 data, NaN fill, and a grid-mapping attribute.
+    """
     if os.path.isdir(path):
         if not overwrite:
             raise FileExistsError(f"Zarr path '{path}' already exists. Use --zarr-overwrite to replace it.")
@@ -212,7 +212,12 @@ def _initialize_zarr_store(path, variables, time_values, y_coords, x_coords,
 
 def _write_zarr_chunk(zarr_path, var_name, time_index, time_value, time_dtype, data_chunk,
                       y_coords, x_coords, y_slice, x_slice):
-    """Write a chunk for a single variable/time step into the Zarr store."""
+    """Write a single-variable, single-time chunk into the Zarr store with bounds checks.
+
+    The function validates the incoming chunk dimensions, stamps grid-mapping
+    metadata, and writes only the requested hyperslab, leaving the rest of the
+    array untouched.
+    """
     y_len = max(0, y_slice.stop - y_slice.start)
     x_len = max(0, x_slice.stop - x_slice.start)
     if y_len == 0 or x_len == 0 or data_chunk.size == 0:
@@ -245,33 +250,50 @@ def _write_zarr_chunk(zarr_path, var_name, time_index, time_value, time_dtype, d
 
 
 def log(message):
+    """Print a message prefixed with the local MPI rank for easier debugging."""
     print(f'[{ESMF.local_pet()}] {message}')
 
 def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative', save_weights_file=None,
                load_weights_file=None, variables=None, time_offsets=None, zarr_path=None,
                overwrite=False, zarr_chunk_y=512, zarr_chunk_x=512, tiff_path=None):
     """
-    Converts a ugrid file to zarr or tiff.
+    Regrid a UGRID NetCDF dataset to a structured lat/lon grid and emit GeoTIFF
+    and/or Zarr outputs.
 
-    df = pc.open_pvd('output_FSM_rhod600/SC.pvd')
-    df=df.set_index('datetime')['2017-11-01':'2018-04-03'].reset_index()
-    df = df.iloc[[0,30,60,90,120]] # every 30days in this period
-    pc.vtu_to_ugrid(df, 'test2.nc')
+    Parameters
+    ----------
+    ugrid_nc : str
+        Path to the source UGRID NetCDF file.
+    dxdy : float, optional
+        Target grid resolution in degrees for both axes.
+    mesh_topology_nc : str, optional
+        Optional separate NetCDF containing the mesh topology (Mesh2, nodes, etc.). Requires global_id
+        to be present in both the mesh and the data netcdfs
+    method : {'conservative', 'bilinear'}
+        ESMF regridding method to use. Currently only conservative works.
+    save_weights_file : str, optional
+        When set, store computed ESMF weights to this file for reuse.
+    load_weights_file : str, optional
+        Load precomputed ESMF weights from this file instead of computing anew.
+    variables : list[str], optional
+        Subset of data variables to convert; defaults to all non-mesh variables.
+    time_offsets : sequence[int], optional
+        Indices of time steps to process; defaults to all steps.
+    zarr_path : str, optional
+        Destination directory for the structured grid dataset as Zarr.
+    overwrite : bool, optional
+        Allow replacement of existing Zarr/TIFF outputs when True.
+    zarr_chunk_y : int, optional
+        Number of rows per Zarr chunk.
+    zarr_chunk_x : int, optional
+        Number of columns per Zarr chunk.
+    tiff_path : str, optional
+        Destination directory for GeoTIFF outputs.
 
-    :param ugrid_nc:
-    :param dxdy:
-    :param mesh_topology_nc:
-    :param method:
-    :param save_weights_file:
-    :param load_weights_file:
-    :param variables:
-    :param time_offsets:
-    :param zarr_path: Optional path to write the structured grid dataset as Zarr.
-    :param overwrite: Overwrite an existing Zarr store if True.
-    :param zarr_chunk_y: Chunk height to use for Zarr variables.
-    :param zarr_chunk_x: Chunk width to use for Zarr variables.
-    :param write_tiffs: Disable GeoTIFF emission when set to False.
-    :return:
+    Returns
+    -------
+    None
+        Results are written to disk; nothing is returned.
     """
     # mg = ESMF.Manager(debug=True)
     comm = MPI.COMM_WORLD
@@ -565,6 +587,7 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
 
 def main():
+    """CLI entry point for converting CHM UGRID NetCDF files to GeoTIFF and/or Zarr."""
     parser = argparse.ArgumentParser(description="Convert CHM UGRID NetCDF to TIFF")
     parser.add_argument("input_nc", help="Path to the input .nc file")
     parser.add_argument("--dxdy", type=float, default=0.01,
