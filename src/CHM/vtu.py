@@ -41,6 +41,7 @@ def _ugrid_vars_only(ds: xr.Dataset) -> list[str]:
             keep.append(name) # ugrid scaffolding
     return keep
 
+
 @xr.register_dataset_accessor("chm")
 class GeoAccessor:
     """
@@ -76,13 +77,25 @@ class GeoAccessor:
         """
         self._obj.to_xarray().to_netcdf(outpath)
 
-    def subset_to_boundingbox(self, lat: list, lon: list) -> ux.UxDataset:
+    def clip(self, lat=None, lon=None, shp_file_path=None) -> ux.UxDataset:
         """
         Subsets all variables to the bounding box given by lat and lon min/max bounds
         """
         ds = self._obj
         d_time = []
         d_notime = []
+
+        if lat is None and lon is None and shp_file_path is None:
+            raise Exception("requires bounding box")
+
+        if lat is None and lon is None:
+            shp = gp.read_file(shp_file_path)
+            shp = shp.to_crs('epsg:4326')
+            lon = [shp.bounds.values.flatten()[0], shp.bounds.values.flatten()[2]]
+            lat = [shp.bounds.values.flatten()[1], shp.bounds.values.flatten()[3]]
+
+        # uxgrid grid
+        uxg = None
 
         for name, da in ds.data_vars.items():
             if 'n_face' not in da.dims:
@@ -97,15 +110,18 @@ class GeoAccessor:
             tmp = da.subset.bounding_box(lon, lat)
             if 'time' in da.dims:
                 d_time.append(tmp)
-                # print(f"Time in {name}")
+
+                if uxg is None:
+                    uxg = tmp.isel(time=0).uxgrid
+
             else:
                 d_notime.append(tmp)
-                # print(f"No time in {name}")
+                if uxg is None:
+                    uxg = tmp.uxgrid
 
         t = xr.merge(d_time)
         nt = xr.merge(d_notime)
         ds = xr.merge([t, nt])
-        uxg = d_time[0].isel(time=0).uxgrid
 
         return ux.UxDataset(ds, uxgrid=uxg)
 
@@ -114,10 +130,7 @@ class GeoAccessor:
         Subsets all variables to a bounding box derived from the extern of the geofile,
         e.g., shapefile, geojson
         """
-        shp = gp.read_file(shp_file_path)
-        shp = shp.to_crs('epsg:4326')
-        lon = [shp.bounds.values.flatten()[0], shp.bounds.values.flatten()[2]]
-        lat = [shp.bounds.values.flatten()[1], shp.bounds.values.flatten()[3]]
+
 
         return self.subset_to_boundingbox(lat, lon)
 
@@ -164,20 +177,16 @@ class GeoAccessor:
 
         # --- remap only the face-centered vars we kept ---
         tmp = ds_in[face_vars]
-        print("starting remap")
         remap = tmp.remap.bilinear(destination_grid=target_grid, remap_to="nodes")
-        print("finished")
 
         pieces = [remap.uxgrid.to_xarray()]  # target topology + coords
 
         # aggregate back to faces; skip any stubborn variables defensively
-        print("aggregate")
         for v in face_vars:
             try:
                 pieces.append(remap[v].topological_mean(destination="face").to_xarray())
             except Exception as e:
                 print(f"[regrid_to_rect] Skipping {v} (aggregate-to-face failed): {e}")
-        print("finished")
 
         df = xr.merge(xr.align(*pieces, join="override", exclude=["time"]), join="exact")
 
