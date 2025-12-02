@@ -258,7 +258,7 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
                overwrite=False, zarr_chunk_y=512, zarr_chunk_x=512, tiff_path=None):
     """
     Regrid a UGRID NetCDF dataset to a structured lat/lon grid and emit GeoTIFF
-    and/or Zarr outputs.
+    and/or Zarr outputs. The variable netcdf MUST have a time dimension.
 
     Parameters
     ----------
@@ -450,7 +450,10 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     processed_times = []
 
     if time_offsets is None:
-        time_offsets = range(0, df.time.shape[0])
+        if 'time' in df.dims:
+            time_offsets = range(0, df.time.shape[0])
+        else:
+            raise Exception("Variable netcdf file requires a time dimension")
 
     time_offsets = list(time_offsets)
     if len(time_offsets) == 0:
