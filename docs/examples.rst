@@ -1,10 +1,11 @@
 Examples
 ==========
 
+Examples showing various use cases
 
 .. toctree::
    :maxdepth: 1
-   :hidden:
+
 
    examples/clip.ipynb
    examples/clip_ugrid.ipynb
