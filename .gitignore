@@ -20,3 +20,4 @@
 view-pychm
 spack.lock
 docs/examples/dask-worker.*
+docs/examples/subset.zarr
