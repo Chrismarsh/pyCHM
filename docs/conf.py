@@ -111,7 +111,19 @@ source_suffix = {
 # a list of builtin themes.
 #
 html_theme = 'sphinx_book_theme'
-
+html_theme_options = {
+    "repository_url": "https://github.com/Chrismarsh/pyCHM",
+    "repository_branch": "develop",
+    "path_to_docs": "docs",
+    "use_edit_page_button": True,
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "home_page_in_toc": False,
+    "logo": {
+        "image_light": "_static/images/pychm_logo.png",
+        "image_dark": "_static/images/pychm_logo.png",
+    },
+}
 
 master_doc = 'index'
 
