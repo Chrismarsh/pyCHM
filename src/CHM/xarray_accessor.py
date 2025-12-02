@@ -44,32 +44,7 @@ def _ugrid_vars_only(ds: xr.Dataset) -> list[str]:
     return keep
 
 
-def _accessor_decorator(name: str):
-    """
-    Return a safe accessor decorator; fall back to a no-op when xarray is mocked.
-
-    Sphinx autodoc mocks xarray when using ``autodoc_mock_imports``, and the
-    mocked ``register_dataset_accessor`` can wrap methods in ways that break
-    signature inspection. Detect that case and skip registration so autodoc can
-    read docstrings without wrapper loops.
-    """
-    try:
-        reg = xr.register_dataset_accessor
-        reg_is_mock = "unittest.mock" in getattr(reg, "__module__", "")
-        reg_name = getattr(reg, "__class__", type(reg)).__name__
-        reg_is_mock = reg_is_mock or reg_name.endswith("Mock")
-    except Exception:
-        reg_is_mock = True
-        reg = None
-
-    if reg is None or reg_is_mock:
-        def decorator(cls):
-            return cls
-        return decorator
-    return reg(name)
-
-
-@_accessor_decorator("chm")
+@xr.register_dataset_accessor("chm")
 class GeoAccessor:
     """xarray accessor for CHM convenience helpers, available via `.chm` on a Dataset."""
     def __init__(self, xarray_obj):
