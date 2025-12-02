@@ -51,12 +51,13 @@ class GeoAccessor:
         self._obj = xarray_obj
 
     def uxgrid_to_netcdf(self, outpath: str) -> None:
-        """Export mesh topology and global IDs from an uxarray dataset to NetCDF.
+        """Export mesh topology and global IDs from an uxarray dataset to NetCDF. No variables
+        are written. To do so, use `vars_to_netcdf`.
 
         Parameters
         ----------
         outpath : str
-            Destination path for the mesh-only NetCDF file (temporary suffix handled internally).
+            Destination path for the mesh-only NetCDF file.
 
         Notes
         -----
@@ -84,7 +85,8 @@ class GeoAccessor:
         os.remove(outpath+".tmp")
 
     def vars_to_netcdf(self, outpath: str) -> None:
-        """Write all variables from the dataset (excluding mesh scaffolding) to NetCDF.
+        """Write all variables from the dataset (excluding mesh scaffolding) to NetCDF. To load,
+        use the mesh written with `uxgrid_to_netcdf`.
 
         Parameters
         ----------
@@ -161,16 +163,18 @@ class GeoAccessor:
         duplicate_reducer: str = "mean",
         extra_exclude: list[str] | None = None,   # user overrides, fnmatch patterns
     ) -> xr.Dataset:
-        """Regrid face-centered variables to a structured grid via uxarray bilinear remap.
+        """Regrid face-centered variables to a structured grid via uxarray bilinear remap. Suitable for
+        meshes that comfortably fit on a single compute node as the regridding uses Uxarray's multi-threaded,
+        non-Dask Cython regridder.
 
         Parameters
         ----------
         dxdy : float, optional
-            Target grid spacing (degrees) in both lat and lon directions.
+            Target grid spacing (decimal degrees) in both lat and lon directions.
         round_decimals : int, optional
             Number of decimal places to round resulting lat/lon coordinates.
         duplicate_reducer : {"mean", "first", "median", "max", "min"}, optional
-            Reduction applied when multiple faces collapse to the same grid cell.
+            Reduction applied when multiple faces collapse to the same grid cell. Default is mean.
         extra_exclude : list[str], optional
             Additional fnmatch patterns to exclude from regridding.
 

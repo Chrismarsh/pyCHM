@@ -20,7 +20,7 @@ spack. Then:
 
 ::
 
-    spack install py-chm
+    spack install py-pychm
 
 
 
