@@ -44,13 +44,50 @@ def _ugrid_vars_only(ds: xr.Dataset) -> list[str]:
     return keep
 
 
-@xr.register_dataset_accessor("chm")
+def _accessor_decorator(name: str):
+    """
+    Return a safe accessor decorator; fall back to a no-op when xarray is mocked.
+
+    Sphinx autodoc mocks xarray when using ``autodoc_mock_imports``, and the
+    mocked ``register_dataset_accessor`` can wrap methods in ways that break
+    signature inspection. Detect that case and skip registration so autodoc can
+    read docstrings without wrapper loops.
+    """
+    try:
+        reg = xr.register_dataset_accessor
+        reg_is_mock = "unittest.mock" in getattr(reg, "__module__", "")
+        reg_name = getattr(reg, "__class__", type(reg)).__name__
+        reg_is_mock = reg_is_mock or reg_name.endswith("Mock")
+    except Exception:
+        reg_is_mock = True
+        reg = None
+
+    if reg is None or reg_is_mock:
+        def decorator(cls):
+            return cls
+        return decorator
+    return reg(name)
+
+
+@_accessor_decorator("chm")
 class GeoAccessor:
     """xarray accessor for CHM convenience helpers, available via `.chm` on a Dataset."""
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
     def uxgrid_to_netcdf(self, outpath: str) -> None:
+        """Export mesh topology and global IDs from an uxarray dataset to NetCDF.
+
+        Parameters
+        ----------
+        outpath : str
+            Destination path for the mesh-only NetCDF file (temporary suffix handled internally).
+
+        Notes
+        -----
+        Only mesh scaffolding variables and ``global_id`` are written. Time
+        dimensions are dropped to keep a static mesh file for downstream tools.
+        """
         ds = self._obj.uxgrid.to_xarray().drop_dims("time", errors="ignore")
         face_vars = _ugrid_vars_only(ds)
         ds = ds[face_vars]
@@ -72,11 +109,32 @@ class GeoAccessor:
         os.remove(outpath+".tmp")
 
     def vars_to_netcdf(self, outpath: str) -> None:
-        """Write all variables (without mesh scaffolding) to a NetCDF file."""
+        """Write all variables from the dataset (excluding mesh scaffolding) to NetCDF.
+
+        Parameters
+        ----------
+        outpath : str
+            Destination path for the NetCDF file.
+        """
         self._obj.to_xarray().to_netcdf(outpath)
 
     def clip(self, lat=None, lon=None, shp_file_path=None) -> ux.UxDataset:
-        """Subset face-centered variables to a lat/lon bounding box or a geometry extent."""
+        """Subset face-centered variables to a lat/lon bounding box or a geometry extent.
+
+        Parameters
+        ----------
+        lat : list[float], optional
+            Two-element list defining latitude bounds [min, max].
+        lon : list[float], optional
+            Two-element list defining longitude bounds [min, max].
+        shp_file_path : str, optional
+            Shapefile/GeoJSON path used to derive bounds when lat/lon are omitted.
+
+        Returns
+        -------
+        ux.UxDataset
+            Subset dataset retaining uxgrid metadata and coordinates.
+        """
         ds = self._obj
         d_time = []
         d_notime = []

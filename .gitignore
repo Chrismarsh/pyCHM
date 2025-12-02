@@ -19,3 +19,4 @@
 .idea
 view-pychm
 spack.lock
+docs/examples/dask-worker.*

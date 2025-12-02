@@ -24,21 +24,7 @@ Key options:
 - ``--zarr-chunk-y`` / ``--zarr-chunk-x``: tune Zarr chunk sizes.
 - ``--overwrite``: allow replacing existing outputs.
 
-xarray accessor
----------------------
 
-Provides a ``Dataset.chm`` accessor for uxarray-backed VTU/UGRID datasets.
-Common helpers:
-
-- ``df.chm.uxgrid_to_netcdf("mesh.nc")``: export mesh scaffolding and global ids.
-- ``df.chm.vars_to_netcdf("all_vars.nc")``: dump all variables to NetCDF.
-- ``df.chm.clip(lat=[ymin, ymax], lon=[xmin, xmax])``: subset to a bounding box
-  or supply a shapefile/geojson via ``shp_file_path``.
-- ``df.chm.regrid(dxdy=0.01)``: bilinear regrid face-centered variables to a
-  structured lat/lon grid (single-node meshes only).
-
-Run accessor methods from Python after loading data with xarray/uxarray; this
-module is not a standalone CLI.
 
 chm_pvd_from_dir
 ------------------

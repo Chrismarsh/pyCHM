@@ -14,14 +14,7 @@ This Python package provides python tooling for working with the `Canadian Hydro
    :hidden:
 
    installation
-   vtu
-   ptconversion
+   xarray_accessor
    tools
+   examples
 
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
