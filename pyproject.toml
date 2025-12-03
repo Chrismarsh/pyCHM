@@ -24,4 +24,5 @@ chm_pvd_from_dir = "CHM.tools.pvd_from_dir:main"
 chm_validateJSON = "CHM.tools.validate_json:main"
 chm_windmapper2mesher = "CHM.tools.windmapper2mesher:main"
 chm_ugrid2grid = "CHM.tools.ugrid2grid:main"
+chm_build_multipart_nc = "CHM.tools.netcdf_multipart.py:main"
 
