@@ -58,3 +58,18 @@ Usage::
 
 The script inspects directional tiles (``*_U.tif``, ``*_V.tif``, ``*spd_up*.tif``),
 derives available wind directions, and writes Ninja variable entries for each.
+
+chm_build_multipart_nc
+----------------------
+
+Create a JSON manifest describing a set of meteorological NetCDF files that
+CHM should read sequentially for forcing.
+
+Usage::
+
+   chm_build_multipart_nc /path/to/met_chunks
+
+This scans the provided directory for ``*.nc`` files, records each file's time
+coverage (start/end) and absolute path, and writes ``metdata-<folder>.json`` to
+the current working directory. Pass that JSON to CHM in place of a single met
+file to enable multipart forcing.
