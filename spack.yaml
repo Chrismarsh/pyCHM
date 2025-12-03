@@ -22,4 +22,5 @@ spack:
     - "py-crc32c"
     - 'py-deprecated'
     - "py-natsort"
+    - "py-tqdm"
   view: ./view-pychm

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import natsort
 import xarray as xr
+from tqdm import tqdm
 
 def build_multipart(folder: str):
     """
@@ -23,8 +24,8 @@ def build_multipart(folder: str):
     base = Path(folder)
     file_paths = natsort.natsorted(glob.glob(str(base / "*.nc")))
     metadata_list = []
-    for file_path in file_paths:
-        print(file_path)
+    for file_path in tqdm(file_paths):
+        # print(file_path)
         ds = xr.open_dataset(file_path)
 
         metadata = {
