@@ -1,3 +1,4 @@
+sphinx <9 # https://github.com/xarray-contrib/sphinx-autosummary-accessors/issues/165
 sphinx-book-theme
 sphinx-autosummary-accessors
 sphinx-design
