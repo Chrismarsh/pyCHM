@@ -16,6 +16,8 @@ UGRID_PATTERNS = [
     "edge_*",
 ]
 
+
+
 def _match_any(name: str, patterns) -> bool:
     return any(fnmatch.fnmatch(name, pat) for pat in patterns)
 
@@ -66,23 +68,15 @@ class GeoAccessor:
         """
         ds = self._obj.uxgrid.to_xarray().drop_dims("time", errors="ignore")
         face_vars = _ugrid_vars_only(ds)
+        face_vars.append('global_id')
         ds = ds[face_vars]
 
         ds = ds.rename({"grid_topology": "Mesh2"})
         ds["Mesh2"].attrs["face_coordinates"] = "Mesh2_face_x Mesh2_face_y"
 
-        ds.to_netcdf(outpath+".tmp")
+        ds.to_netcdf(outpath)
         ds = None
 
-        # copy global_id from source into target
-        global_id = self._obj["global_id"].to_dataset().drop_dims("time", errors="ignore")
-
-        tgt = xr.open_mfdataset(outpath+".tmp")
-        tgt = xr.merge([tgt, global_id])
-        tgt.to_netcdf(outpath)
-        tgt = None
-
-        os.remove(outpath+".tmp")
 
     def vars_to_netcdf(self, outpath: str) -> None:
         """Write all variables from the dataset (excluding mesh scaffolding) to NetCDF. To load,
