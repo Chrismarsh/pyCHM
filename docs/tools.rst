@@ -9,7 +9,9 @@ chm_ugrid2grid
 ----------------
 
 Convert CHM UGRID NetCDF files to structured GeoTIFF or Zarr outputs using ESMF
-regridding.
+regridding. Input can be NetCDF, a Zarr store directory, or a kerchunk
+reference file (json/yaml). Zarr/kerchunk inputs require ``--mesh`` pointing
+to a NetCDF UGRID mesh topology file.
 
 Example::
 

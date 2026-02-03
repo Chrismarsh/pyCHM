@@ -17,6 +17,7 @@ import glob
 import itertools
 import argparse
 from pathlib import Path
+import fsspec
 
 from osgeo import gdal
 gdal.UseExceptions()
@@ -263,7 +264,8 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     Parameters
     ----------
     ugrid_nc : str
-        Path to the source UGRID NetCDF file.
+        Path to the source UGRID NetCDF file, a Zarr store directory, or a
+        kerchunk reference file (json/yaml).
     dxdy : float, optional
         Target grid resolution in degrees for both axes.
     mesh_topology_nc : str, optional
@@ -307,8 +309,16 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     if save_weights_file is not None and load_weights_file is not None:
         raise Exception("Cannot have both save_weights_file and load_weights_file set")
 
+    input_path = Path(ugrid_nc)
+    is_zarr_input = input_path.is_dir() or input_path.suffix == ".zarr"
+    is_ref_input = input_path.suffix in (".json", ".yaml", ".yml")
+    if (is_zarr_input or is_ref_input) and mesh_topology_nc is None:
+        raise ValueError(
+            "Zarr or kerchunk inputs require --mesh pointing to a NetCDF UGRID mesh topology file."
+        )
+
     # we might be loading a seperate mesh topology
-    mnc = ugrid_nc if mesh_topology_nc is None else mesh_topology_nc
+    mnc = mesh_topology_nc if mesh_topology_nc is not None else ugrid_nc
 
     mesh = ESMF.Mesh(filename=mnc,
                             filetype=ESMF.api.constants.FileFormat.UGRID,
@@ -397,7 +407,14 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 
     # grid._write_(f'{ESMF.local_pet()}-grid')
 
-    df = xr.open_mfdataset(ugrid_nc)
+    if is_ref_input:
+        ref_fs = fsspec.filesystem("reference", fo=str(input_path))
+        mapper = ref_fs.get_mapper("")
+        df = xr.open_zarr(mapper, consolidated=False)
+    elif is_zarr_input:
+        df = xr.open_zarr(ugrid_nc, consolidated=False)
+    else:
+        df = xr.open_mfdataset(ugrid_nc)
 
     if variables is None:
         variables = list(df.keys())
@@ -592,7 +609,7 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
 def main():
     """CLI entry point for converting CHM UGRID NetCDF files to GeoTIFF and/or Zarr."""
     parser = argparse.ArgumentParser(description="Convert CHM UGRID NetCDF to TIFF")
-    parser.add_argument("input_nc", help="Path to the input .nc file")
+    parser.add_argument("input_nc", help="Path to the input .nc file, .zarr directory, or kerchunk json/yaml")
     parser.add_argument("--dxdy", type=float, default=0.01,
                         help="Grid resolution in degrees (default: 0.01)")
     parser.add_argument("--mesh", type=str, default=None,
