@@ -419,7 +419,7 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     if variables is None:
         variables = list(df.keys())
 
-    # don't convert these to tiff
+    # don't convert these
     exclude_list = ['Mesh2', 'Mesh2_face_nodes', 'Mesh2_node_x', 'Mesh2_node_y', 'Mesh2_face_x', 'Mesh2_face_y', 'time', 'global_id' ]
 
     # the sort is important as otherwise this can have a different order on different mpi ranks
@@ -459,7 +459,9 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     srcfield_offsets.read(filename=mnc,
                           variable='global_id', timeslice=0)
     offsets = np.array(srcfield_offsets.data[:], dtype=np.int64) #these need to be ints to index with
-    offset_mask = df.global_id.isin(offsets).compute()
+
+    # global_id is not time variant but it can be output on a per timestep and end up time variant
+    offset_mask = df.global_id.isin(offsets).pipe(lambda x: x.any("time") if "time" in x.dims else x).compute()
     srcfield_offsets.destroy()
     srcfield_offsets = None
 
