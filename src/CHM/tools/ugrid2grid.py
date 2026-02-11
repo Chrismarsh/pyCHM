@@ -461,7 +461,7 @@ def ugrid2grid(ugrid_nc, dxdy=0.01, mesh_topology_nc=None, method='conservative'
     offsets = np.array(srcfield_offsets.data[:], dtype=np.int64) #these need to be ints to index with
 
     # global_id is not time variant but it can be output on a per timestep and end up time variant
-    offset_mask = df.global_id.isin(offsets).pipe(lambda x: x.any("time") if "time" in x.dims else x).compute()
+    offset_mask = df.global_id.isin(offsets).pipe(lambda x: x.isel(time=0).drop_vars('time') if "time" in x.dims else x).compute()
     srcfield_offsets.destroy()
     srcfield_offsets = None
 
