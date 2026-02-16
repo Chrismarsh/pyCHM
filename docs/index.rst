@@ -11,7 +11,7 @@ This Python package provides python tooling for working with the `Canadian Hydro
 It is built on top of Uxarray, xarray, and ESMF. It principally covers regridding the unstructured mesh to structured,
 such as zarr, netcdf, and GeoTiff.
 
-These are provided via an xarray accessor (`Dataset.chm.*`) and CLI tools.
+These are provided via an xarray accessor (``UxDataset.chm.*``) and CLI tools.
 
 .. toctree::
    :maxdepth: 2
